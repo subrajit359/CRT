@@ -32,8 +32,8 @@ router.post("/", requireAuth(), async (req, res) => {
     let evalText;
     try {
       const resp = await openai.chat.completions.create({
-        model: "gpt-5.4",
-        max_completion_tokens: 1200,
+        model: process.env.AI_MODEL || "gemini-2.5-flash",
+        max_tokens: 1200,
         messages: [
           { role: "system", content: "You evaluate clinical reasoning strictly per the user's instructions. Output only the structured format requested." },
           { role: "user", content: prompt },
