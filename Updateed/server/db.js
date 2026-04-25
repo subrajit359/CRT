@@ -1,0 +1,282 @@
+import pg from "pg";
+
+const { Pool } = pg;
+
+if (!process.env.DATABASE_URL) {
+  console.warn("[db] DATABASE_URL is not set");
+}
+
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 10,
+});
+
+export async function query(text, params) {
+  const start = Date.now();
+  const res = await pool.query(text, params);
+  const ms = Date.now() - start;
+  if (ms > 250) console.log(`[db] slow query ${ms}ms ${text.slice(0, 80)}`);
+  return res;
+}
+
+async function applyOnce(id, fn) {
+  const { rows } = await query(`SELECT 1 FROM migrations WHERE id=$1`, [id]);
+  if (rows[0]) return;
+  await fn();
+  await query(`INSERT INTO migrations (id) VALUES ($1)`, [id]);
+  console.log(`[db] migration applied: ${id}`);
+}
+
+export async function initDb() {
+  if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL missing — provision a database first");
+  }
+  await query(`CREATE EXTENSION IF NOT EXISTS pgcrypto`);
+
+  await query(`CREATE TABLE IF NOT EXISTS migrations (
+    id          TEXT PRIMARY KEY,
+    applied_at  TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS users (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email        TEXT UNIQUE NOT NULL,
+    username     TEXT UNIQUE NOT NULL,
+    full_name    TEXT NOT NULL,
+    role         TEXT NOT NULL CHECK (role IN ('student','doctor','admin')),
+    country      TEXT,
+    created_at   TIMESTAMPTZ DEFAULT NOW(),
+    last_login   TIMESTAMPTZ
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS student_profiles (
+    user_id      UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    year_of_study TEXT,
+    show_scores  BOOLEAN DEFAULT FALSE,
+    global_level INT DEFAULT 1,
+    specialty_levels JSONB DEFAULT '{}'
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS doctor_profiles (
+    user_id        UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    degree         TEXT,
+    specialty      TEXT NOT NULL,
+    years_exp      INT,
+    license_number TEXT,
+    hospital       TEXT,
+    proof_text     TEXT,
+    status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+    reviewed_at    TIMESTAMPTZ,
+    reviewer_note  TEXT
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS otp_codes (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email      TEXT NOT NULL,
+    code_hash  TEXT NOT NULL,
+    purpose    TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed   BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  await query(`ALTER TABLE otp_codes DROP CONSTRAINT IF EXISTS otp_codes_purpose_check`);
+  await query(`ALTER TABLE otp_codes ADD CONSTRAINT otp_codes_purpose_check CHECK (purpose IN ('login','register','reset'))`);
+
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_key TEXT`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS typing_to_user_id UUID`);
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS typing_at TIMESTAMPTZ`);
+
+  await query(`CREATE INDEX IF NOT EXISTS otp_codes_email_idx ON otp_codes (email, created_at DESC)`);
+
+  await query(`CREATE TABLE IF NOT EXISTS sessions (
+    token      TEXT PRIMARY KEY,
+    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS cases (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title        TEXT NOT NULL,
+    specialty    TEXT NOT NULL,
+    level        INT NOT NULL DEFAULT 1,
+    body         TEXT NOT NULL,
+    questions    JSONB NOT NULL DEFAULT '[]',
+    source       TEXT NOT NULL DEFAULT 'original',
+    source_kind  TEXT NOT NULL CHECK (source_kind IN ('ai','admin','doctor')),
+    uploader_id  UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at   TIMESTAMPTZ DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ DEFAULT NOW(),
+    deleted_at   TIMESTAMPTZ
+  )`);
+
+  await query(`CREATE INDEX IF NOT EXISTS cases_specialty_idx ON cases (specialty)`);
+  await query(`CREATE INDEX IF NOT EXISTS cases_level_idx ON cases (level)`);
+
+  // Diagnosis fields (added April 2026) — visible only to doctor/admin; used for deterministic answer matching.
+  await query(`ALTER TABLE cases ADD COLUMN IF NOT EXISTS diagnosis TEXT`);
+  await query(`ALTER TABLE cases ADD COLUMN IF NOT EXISTS accepted_diagnoses JSONB NOT NULL DEFAULT '[]'`);
+  await query(`ALTER TABLE cases ADD COLUMN IF NOT EXISTS diagnosis_explanation TEXT`);
+
+  await query(`CREATE TABLE IF NOT EXISTS case_verifications (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    case_id      UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    doctor_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    action       TEXT NOT NULL CHECK (action IN ('verify','unverify')),
+    reason       TEXT,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  await query(`CREATE INDEX IF NOT EXISTS case_verifications_case_idx ON case_verifications (case_id, created_at DESC)`);
+
+  await query(`CREATE TABLE IF NOT EXISTS responses (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    case_id      UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    question_idx INT NOT NULL DEFAULT 0,
+    user_answer  TEXT NOT NULL,
+    eval_json    JSONB,
+    score        INT,
+    created_at   TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  await query(`CREATE INDEX IF NOT EXISTS responses_user_idx ON responses (user_id, created_at DESC)`);
+
+  await query(`CREATE TABLE IF NOT EXISTS thumbs_up (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    case_id UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (user_id, case_id)
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS reports (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    case_id    UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    reason     TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS discussions (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    case_id    UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL DEFAULT 'doctor' CHECK (kind IN ('doctor','delete-request')),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (case_id, kind)
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS discussion_messages (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    discussion_id UUID NOT NULL REFERENCES discussions(id) ON DELETE CASCADE,
+    user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body          TEXT NOT NULL,
+    created_at    TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS delete_requests (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    case_id       UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    requested_by  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason        TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','approved','rejected','edit_instead')),
+    decided_by    UUID REFERENCES users(id) ON DELETE SET NULL,
+    decided_at    TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  await query(`CREATE TABLE IF NOT EXISTS notifications (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL,
+    title      TEXT NOT NULL,
+    body       TEXT,
+    link       TEXT,
+    read_at    TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  await query(`CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at DESC)`);
+
+  await query(`CREATE TABLE IF NOT EXISTS case_attachments (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    case_id       UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    uploader_id   UUID REFERENCES users(id) ON DELETE SET NULL,
+    filename      TEXT NOT NULL,
+    mime_type     TEXT NOT NULL,
+    size_bytes    INT NOT NULL,
+    storage_url   TEXT NOT NULL,
+    storage_key   TEXT,
+    kind          TEXT NOT NULL CHECK (kind IN ('image','pdf','other')),
+    created_at    TIMESTAMPTZ DEFAULT NOW()
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS case_attachments_case_idx ON case_attachments (case_id, created_at)`);
+
+  await query(`CREATE TABLE IF NOT EXISTS lounge_messages (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body        TEXT NOT NULL,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS lounge_messages_idx ON lounge_messages (created_at DESC)`);
+
+  await query(`CREATE TABLE IF NOT EXISTS dm_threads (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_a      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_b      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    last_at     TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (user_a < user_b),
+    UNIQUE (user_a, user_b)
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS dm_threads_a_idx ON dm_threads (user_a, last_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS dm_threads_b_idx ON dm_threads (user_b, last_at DESC)`);
+
+  await query(`CREATE TABLE IF NOT EXISTS dm_messages (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    thread_id   UUID NOT NULL REFERENCES dm_threads(id) ON DELETE CASCADE,
+    sender_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body        TEXT NOT NULL,
+    read_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS dm_messages_thread_idx ON dm_messages (thread_id, created_at)`);
+
+  await applyOnce("2026-04-25-clear-library-autoverify", async () => {
+    await query(`DELETE FROM case_verifications
+                 WHERE case_id IN (SELECT id FROM cases WHERE source = 'Reasonal Library')`);
+  });
+
+  // Generic key/value config (used for VAPID keys etc.)
+  await query(`CREATE TABLE IF NOT EXISTS app_config (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  // Web push subscriptions
+  await query(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint       TEXT NOT NULL UNIQUE,
+    p256dh         TEXT NOT NULL,
+    auth           TEXT NOT NULL,
+    user_agent     TEXT,
+    created_at     TIMESTAMPTZ DEFAULT NOW(),
+    last_used_at   TIMESTAMPTZ DEFAULT NOW()
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions (user_id)`);
+
+  // Per-user notification preferences (web push on/off + per-kind, JSON)
+  await query(`CREATE TABLE IF NOT EXISTS notification_prefs (
+    user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    push_on    BOOLEAN NOT NULL DEFAULT TRUE,
+    kinds      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  console.log("[db] schema ready");
+}
