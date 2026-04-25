@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: reasonal-api
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install --omit=optional
+    startCommand: node index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_ONLY
+        value: "1"
+      - key: COOKIE_CROSS_SITE
+        value: "1"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: reasonal-db
+          property: connectionString
+      - key: AI_INTEGRATIONS_OPENAI_API_KEY
+        sync: false
+      - key: AI_INTEGRATIONS_OPENAI_BASE_URL
+        sync: false
+      - key: CLOUDINARY_URL
+        sync: false
+      - key: SMTP_URL
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
+
+databases:
+  - name: reasonal-db
+    plan: free
+    region: oregon
+    postgresMajorVersion: 16
