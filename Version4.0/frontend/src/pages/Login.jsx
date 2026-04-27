@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLocation, Link } from "wouter";
 import AppShell from "../components/AppShell.jsx";
-import { api } from "../lib/api.js";
+import { api, saveToken } from "../lib/api.js";
 import { useToast } from "../components/Toast.jsx";
 import { useAuth } from "../lib/auth.jsx";
 
@@ -18,7 +18,8 @@ export default function Login() {
     e.preventDefault();
     setBusy(true);
     try {
-      await api.post("/api/auth/login", { email, password });
+      const r = await api.post("/api/auth/login", { email, password });
+      if (r.token) saveToken(r.token);
       await refresh();
       toast.success("Welcome back");
       navigate("/");

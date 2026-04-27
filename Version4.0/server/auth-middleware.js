@@ -33,7 +33,11 @@ export function clearSessionCookie(res) {
 }
 
 export async function getUserFromRequest(req) {
-  const token = req.cookies?.[COOKIE_NAME];
+  let token = req.cookies?.[COOKIE_NAME];
+  if (!token) {
+    const auth = req.headers["authorization"] || "";
+    if (auth.startsWith("Bearer ")) token = auth.slice(7).trim();
+  }
   if (!token) return null;
   const { rows } = await query(
     `SELECT u.id, u.email, u.username, u.full_name, u.role, u.country, u.avatar_url

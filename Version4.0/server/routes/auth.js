@@ -84,7 +84,7 @@ router.post("/login", async (req, res) => {
     await query(`UPDATE users SET last_login=NOW() WHERE id=$1`, [user.id]);
     const sess = await createSession(user.id);
     setSessionCookie(res, sess.token, sess.expires);
-    res.json({ ok: true });
+    res.json({ ok: true, token: sess.token, expires: sess.expires });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -143,7 +143,7 @@ router.post("/register-student", async (req, res) => {
     await notify(rows[0].id, "welcome", "Welcome to Reasonal", "Start with the practice loop. One case, one question, one sharp evaluation.", "/practice");
     const sess = await createSession(rows[0].id);
     setSessionCookie(res, sess.token, sess.expires);
-    res.json({ ok: true });
+    res.json({ ok: true, token: sess.token, expires: sess.expires });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

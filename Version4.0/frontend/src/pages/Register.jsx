@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Check, X, Circle } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
-import { api } from "../lib/api.js";
+import { api, saveToken } from "../lib/api.js";
 import { useToast } from "../components/Toast.jsx";
 import { useAuth } from "../lib/auth.jsx";
 import { COUNTRIES, YEAR_OF_STUDY_OPTIONS } from "../lib/countries.js";
@@ -84,7 +84,8 @@ export default function Register() {
     setBusy(true);
     try {
       if (role === "student") {
-        await api.post("/api/auth/register-student", { email, username, fullName, country, yearOfStudy, password });
+        const r = await api.post("/api/auth/register-student", { email, username, fullName, country, yearOfStudy, password });
+        if (r.token) saveToken(r.token);
         await refresh();
         toast.success("Welcome to Reasonal");
         navigate("/");

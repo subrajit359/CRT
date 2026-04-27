@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { api } from "./api.js";
+import { api, clearToken } from "./api.js";
 
 const AuthCtx = createContext(null);
 const ThemeCtx = createContext(null);
@@ -72,6 +72,7 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     try { await api.post("/api/auth/logout", {}); } catch {}
+    clearToken();
     setUser(null);
     window.location.href = "/";
   }, []);

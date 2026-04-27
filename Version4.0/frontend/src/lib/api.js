@@ -1,6 +1,18 @@
 const RAW_BASE = (import.meta.env.VITE_API_URL || "").trim();
 const API_BASE = RAW_BASE.replace(/\/+$/, "");
 
+const TOKEN_KEY = "rsn_token";
+
+export function saveToken(token) {
+  try { if (token) localStorage.setItem(TOKEN_KEY, token); else localStorage.removeItem(TOKEN_KEY); } catch {}
+}
+export function getToken() {
+  try { return localStorage.getItem(TOKEN_KEY) || null; } catch { return null; }
+}
+export function clearToken() {
+  try { localStorage.removeItem(TOKEN_KEY); } catch {}
+}
+
 export function apiUrl(path) {
   if (!path) return API_BASE || "";
   if (/^https?:\/\//i.test(path)) return path;
@@ -8,11 +20,13 @@ export function apiUrl(path) {
 }
 
 async function request(method, path, body) {
+  const token = getToken();
   const opts = {
     method,
     credentials: "include",
     headers: { "Accept": "application/json" },
   };
+  if (token) opts.headers["Authorization"] = `Bearer ${token}`;
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
@@ -32,6 +46,9 @@ async function request(method, path, body) {
 }
 
 async function uploadFiles(path, files, fieldName = "files", extraFields = null) {
+  const token = getToken();
+  const headers = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   const fd = new FormData();
   for (const f of files) fd.append(fieldName, f);
   if (extraFields && typeof extraFields === "object") {
@@ -39,7 +56,7 @@ async function uploadFiles(path, files, fieldName = "files", extraFields = null)
       if (v !== undefined && v !== null) fd.append(k, typeof v === "string" ? v : String(v));
     }
   }
-  const res = await fetch(apiUrl(path), { method: "POST", credentials: "include", body: fd });
+  const res = await fetch(apiUrl(path), { method: "POST", credentials: "include", headers, body: fd });
   let data = null;
   const ct = res.headers.get("content-type") || "";
   if (ct.includes("application/json")) data = await res.json();
