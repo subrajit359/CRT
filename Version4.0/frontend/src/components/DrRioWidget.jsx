@@ -421,7 +421,7 @@ export default function DrRioWidget(props = {}) {
                       <button
                         key={s}
                         type="button"
-                        onClick={() => send(s)}
+                        onClick={() => setInput(s)}
                         style={{
                           textAlign: "left",
                           background: "var(--bg-elev, #fff)",
