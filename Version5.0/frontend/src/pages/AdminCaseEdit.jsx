@@ -25,7 +25,9 @@ export default function AdminCaseEdit() {
   const [specialties, setSpecialties] = useState([]);
 
   const [title, setTitle] = useState("");
-  const [specialty, setSpecialty] = useState("");
+  // Multi-specialty: cases can be tagged with one or more specialties.
+  const [selectedSpecialties, setSelectedSpecialties] = useState([]);
+  const [customSpecialty, setCustomSpecialty] = useState("");
   const [level, setLevel] = useState(1);
   const [body, setBody] = useState("");
   const [question, setQuestion] = useState("");
@@ -47,7 +49,11 @@ export default function AdminCaseEdit() {
       const r = await api.get(`/api/cases/${id}`);
       const c = r.case;
       setTitle(c.title || "");
-      setSpecialty(c.specialty || "");
+      const arr = Array.isArray(c.specialties) && c.specialties.length > 0
+        ? c.specialties
+        : (c.specialty ? [c.specialty] : []);
+      setSelectedSpecialties(arr);
+      setCustomSpecialty("");
       setLevel(c.level || 1);
       setBody(c.body || "");
       const firstQ = Array.isArray(c.questions) && c.questions[0] ? c.questions[0] : {};
@@ -65,16 +71,41 @@ export default function AdminCaseEdit() {
 
   useEffect(() => { if (id) loadCase(); /* eslint-disable-next-line */ }, [id]);
 
+  function toggleSpecialty(s) {
+    const v = String(s || "").trim();
+    if (!v) return;
+    setSelectedSpecialties((curr) => {
+      const i = curr.findIndex((x) => x.toLowerCase() === v.toLowerCase());
+      if (i >= 0) return curr.filter((_, idx) => idx !== i);
+      return [...curr, v];
+    });
+  }
+  function addCustomSpecialty() {
+    const v = customSpecialty.trim();
+    if (!v) return;
+    setSelectedSpecialties((curr) => {
+      if (curr.some((x) => x.toLowerCase() === v.toLowerCase())) return curr;
+      return [...curr, v];
+    });
+    setCustomSpecialty("");
+  }
+
   async function onSave(e) {
     e.preventDefault();
-    if (!title.trim() || !specialty.trim() || body.trim().length < 80 || !question.trim() || !diagnosis.trim()) {
-      return toast.error("Fill in all required fields (body must be ≥ 80 chars).");
+    // Include any pending typed-but-not-added text so users don't lose work.
+    const pending = customSpecialty.trim();
+    const finalSpecialties = [...selectedSpecialties];
+    if (pending && !finalSpecialties.some((x) => x.toLowerCase() === pending.toLowerCase())) {
+      finalSpecialties.push(pending);
+    }
+    if (!title.trim() || finalSpecialties.length === 0 || body.trim().length < 80 || !question.trim() || !diagnosis.trim()) {
+      return toast.error("Fill in all required fields (body must be ≥ 80 chars, at least one specialty).");
     }
     setSaving(true);
     try {
       await api.patch(`/api/cases/${id}`, {
         title: title.trim(),
-        specialty: specialty.trim(),
+        specialties: finalSpecialties,
         level: parseInt(level, 10) || 1,
         body: body.trim(),
         diagnosis: diagnosis.trim(),
@@ -181,26 +212,87 @@ export default function AdminCaseEdit() {
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required />
           </div>
 
-          <div className="row" style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <div className="field" style={{ flex: "1 1 220px" }}>
-              <label className="label">Specialty</label>
+          <div className="field">
+            <label className="label">
+              Specialties
+              <span className="muted small" style={{ marginLeft: 6 }}>
+                (one or more — no primary)
+              </span>
+            </label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+              {specialties.map((s) => {
+                const on = selectedSpecialties.some((x) => x.toLowerCase() === s.toLowerCase());
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => toggleSpecialty(s)}
+                    aria-pressed={on}
+                    className="btn"
+                    style={{
+                      background: on ? "var(--primary)" : "transparent",
+                      color: on ? "#fff" : "var(--ink-800)",
+                      border: `1px solid ${on ? "var(--primary)" : "var(--line)"}`,
+                      borderRadius: 999,
+                      padding: "6px 12px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {on ? "✓ " : ""}{s}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
               <input
                 className="input"
-                value={specialty}
-                onChange={(e) => setSpecialty(e.target.value)}
-                list="admin-edit-specialties"
-                required
+                value={customSpecialty}
+                onChange={(e) => setCustomSpecialty(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); addCustomSpecialty(); }
+                }}
+                placeholder="Add another specialty (e.g. Hematology)"
               />
-              <datalist id="admin-edit-specialties">
-                {specialties.map((s) => <option key={s} value={s} />)}
-              </datalist>
+              <button type="button" className="btn btn-secondary" onClick={addCustomSpecialty}>Add</button>
             </div>
-            <div className="field" style={{ flex: "0 1 160px" }}>
-              <label className="label">Level</label>
-              <select className="input" value={level} onChange={(e) => setLevel(parseInt(e.target.value, 10))}>
-                {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>Level {n}</option>)}
-              </select>
-            </div>
+            {selectedSpecialties.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                {selectedSpecialties.map((s) => (
+                  <span
+                    key={s}
+                    className="badge"
+                    style={{
+                      background: "var(--primary)",
+                      color: "#fff",
+                      borderRadius: 999,
+                      padding: "4px 10px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    {s}
+                    <button
+                      type="button"
+                      onClick={() => toggleSpecialty(s)}
+                      aria-label={`Remove ${s}`}
+                      style={{
+                        background: "transparent", color: "#fff", border: "none",
+                        cursor: "pointer", fontWeight: 700, padding: 0, lineHeight: 1,
+                      }}
+                    >×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="field" style={{ maxWidth: 200 }}>
+            <label className="label">Level</label>
+            <select className="input" value={level} onChange={(e) => setLevel(parseInt(e.target.value, 10))}>
+              {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>Level {n}</option>)}
+            </select>
           </div>
 
           <div className="field">

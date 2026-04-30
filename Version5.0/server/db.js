@@ -129,6 +129,15 @@ export async function initDb() {
   await query(`CREATE INDEX IF NOT EXISTS cases_specialty_idx ON cases (specialty)`);
   await query(`CREATE INDEX IF NOT EXISTS cases_level_idx ON cases (level)`);
 
+  // Multi-specialty support: a case can be tagged with one or more specialties.
+  // The legacy `specialty` column is kept in sync with specialties[0] so any old
+  // queries still work.
+  await query(`ALTER TABLE cases ADD COLUMN IF NOT EXISTS specialties TEXT[] NOT NULL DEFAULT '{}'`);
+  await query(`UPDATE cases SET specialties = ARRAY[specialty]
+                 WHERE (array_length(specialties, 1) IS NULL OR array_length(specialties, 1) = 0)
+                   AND specialty IS NOT NULL AND specialty <> ''`);
+  await query(`CREATE INDEX IF NOT EXISTS cases_specialties_gin_idx ON cases USING GIN (specialties)`);
+
   // Diagnosis fields (added April 2026) — visible only to doctor/admin; used for deterministic answer matching.
   await query(`ALTER TABLE cases ADD COLUMN IF NOT EXISTS diagnosis TEXT`);
   await query(`ALTER TABLE cases ADD COLUMN IF NOT EXISTS accepted_diagnoses JSONB NOT NULL DEFAULT '[]'`);

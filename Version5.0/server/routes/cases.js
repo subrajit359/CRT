@@ -41,9 +41,32 @@ router.get("/specialties", (req, res) => res.json({ specialties: SPECIALTIES }))
 // Inside each block, fields are written as `Key: value`. Body/Question/Explanation can
 // span multiple lines until the next key is encountered.
 const BULK_KEYS = [
-  "title", "specialty", "level", "source",
+  "title", "specialty", "specialties", "level", "source",
   "body", "question", "diagnosis", "accepted", "explanation",
 ];
+
+// A case can be tagged with one or more specialties. Pull them out of either
+// `Specialties:` (preferred, comma/semicolon/pipe-separated) or the legacy
+// single `Specialty:` key, then de-dupe and trim.
+function parseSpecialtyList(...sources) {
+  const out = [];
+  const seen = new Set();
+  for (const s of sources) {
+    if (!s) continue;
+    const parts = Array.isArray(s)
+      ? s
+      : String(s).split(/[,;|]/);
+    for (const p of parts) {
+      const v = String(p || "").trim();
+      if (!v) continue;
+      const key = v.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(v);
+    }
+  }
+  return out;
+}
 const BULK_KEY_RE = new RegExp(`^\\s*(${BULK_KEYS.join("|")})\\s*:\\s*(.*)$`, "i");
 
 function parseBulkText(text) {
@@ -98,7 +121,7 @@ router.post("/bulk", requireAuth(["doctor", "admin"]), bulkUpload.any(), async (
     for (let i = 0; i < parsed.length; i++) {
       const f = parsed[i];
       const title = f.title || "";
-      const specialty = f.specialty || "";
+      const specialtiesArr = parseSpecialtyList(f.specialties, f.specialty);
       const level = parseInt(f.level, 10) || 1;
       const body = f.body || "";
       const source = f.source || "Original";
@@ -108,16 +131,16 @@ router.post("/bulk", requireAuth(["doctor", "admin"]), bulkUpload.any(), async (
         .split(/[,;|]/).map((s) => s.trim()).filter(Boolean);
       const diagnosisExplanation = f.explanation || null;
 
-      if (!title || !specialty || body.length < 80 || !question || !diagnosis) {
-        errors.push({ index: i + 1, title: title || "(no title)", error: "Missing required fields (title, specialty, body ≥ 80 chars, question, diagnosis)" });
+      if (!title || specialtiesArr.length === 0 || body.length < 80 || !question || !diagnosis) {
+        errors.push({ index: i + 1, title: title || "(no title)", error: "Missing required fields (title, at least one specialty, body ≥ 80 chars, question, diagnosis)" });
         continue;
       }
       try {
         const { rows } = await query(
-          `INSERT INTO cases (title, specialty, level, body, questions, source, source_kind, uploader_id,
+          `INSERT INTO cases (title, specialty, specialties, level, body, questions, source, source_kind, uploader_id,
                               diagnosis, accepted_diagnoses, diagnosis_explanation)
-           VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10::jsonb,$11) RETURNING id`,
-          [title, specialty, level, body,
+           VALUES ($1,$2,$3::text[],$4,$5,$6::jsonb,$7,$8,$9,$10,$11::jsonb,$12) RETURNING id`,
+          [title, specialtiesArr[0], specialtiesArr, level, body,
            JSON.stringify([{ prompt: question, expectation: "" }]),
            source, sourceKind, req.user.id,
            diagnosis, JSON.stringify(acceptedDiagnoses), diagnosisExplanation]
@@ -185,12 +208,14 @@ router.post("/bulk", requireAuth(["doctor", "admin"]), bulkUpload.any(), async (
 router.get("/", requireAuth(), async (req, res) => {
   const { specialty, level, q } = req.query;
   const params = [];
-  let where = "deleted_at IS NULL";
-  if (specialty) { params.push(specialty); where += ` AND specialty=$${params.length}`; }
-  if (level) { params.push(parseInt(level, 10)); where += ` AND level=$${params.length}`; }
-  if (q) { params.push(`%${q}%`); where += ` AND (title ILIKE $${params.length} OR body ILIKE $${params.length})`; }
+  let where = "c.deleted_at IS NULL";
+  // Match against the multi-specialty array so a case tagged with several
+  // specialties shows up under each one.
+  if (specialty) { params.push(specialty); where += ` AND $${params.length} = ANY(c.specialties)`; }
+  if (level) { params.push(parseInt(level, 10)); where += ` AND c.level=$${params.length}`; }
+  if (q) { params.push(`%${q}%`); where += ` AND (c.title ILIKE $${params.length} OR c.body ILIKE $${params.length})`; }
   const { rows } = await query(
-    `SELECT c.id, c.title, c.specialty, c.level, c.source, c.source_kind, c.created_at,
+    `SELECT c.id, c.title, c.specialty, c.specialties, c.level, c.source, c.source_kind, c.created_at,
             u.username AS uploader_username, u.full_name AS uploader_name,
             (SELECT COUNT(*)::int FROM case_verifications WHERE case_id=c.id AND action='verify') AS verify_count,
             (SELECT COUNT(*)::int FROM case_verifications WHERE case_id=c.id AND action='unverify') AS unverify_count,
@@ -223,11 +248,12 @@ router.get("/groups", requireAuth(), async (req, res) => {
     params.push(level);
     levelFilter = ` AND c.level=$${params.length}`;
   }
+  // Multi-specialty: include any case whose specialties array contains this one.
   const { rows: cases } = await query(
     `SELECT c.id, c.title, c.level, c.created_at,
             EXISTS(SELECT 1 FROM responses r WHERE r.case_id=c.id AND r.user_id=$2) AS attempted
        FROM cases c
-       WHERE c.specialty=$1 AND c.deleted_at IS NULL${levelFilter}
+       WHERE $1 = ANY(c.specialties) AND c.deleted_at IS NULL${levelFilter}
        ORDER BY c.level ASC, c.created_at ASC, c.id ASC`,
     params
   );
@@ -263,7 +289,7 @@ router.get("/random", requireAuth(), async (req, res) => {
   const excludeAttempted = req.query.excludeAttempted === "true" || req.query.excludeAttempted === "1";
   const params = [];
   let where = "c.deleted_at IS NULL";
-  if (specialty) { params.push(specialty); where += ` AND c.specialty=$${params.length}`; }
+  if (specialty) { params.push(specialty); where += ` AND $${params.length} = ANY(c.specialties)`; }
   if (level) { params.push(parseInt(level, 10)); where += ` AND c.level=$${params.length}`; }
   if (excludeAttempted) {
     params.push(req.user.id);
@@ -300,7 +326,7 @@ router.get("/prev", requireAuth(), async (req, res) => {
   if (!cur[0]) return res.status(404).json({ error: "Current case not found" });
   const { rows } = await query(
     `SELECT id FROM cases
-       WHERE deleted_at IS NULL AND specialty=$1
+       WHERE deleted_at IS NULL AND $1 = ANY(specialties)
          AND (created_at < $2 OR (created_at = $2 AND id < $3))
        ORDER BY created_at DESC, id DESC
        LIMIT 1`,
@@ -369,7 +395,9 @@ router.get("/:id", requireAuth(), async (req, res) => {
 router.post("/", requireAuth(["doctor", "admin"]), async (req, res) => {
   try {
     const title = String(req.body.title || "").trim();
-    const specialty = String(req.body.specialty || "").trim();
+    // A case can have one or more specialties. Accept either `specialties` (array
+    // or comma-separated string, preferred) or the legacy `specialty` (single).
+    const specialtiesArr = parseSpecialtyList(req.body.specialties, req.body.specialty);
     const level = parseInt(req.body.level, 10) || 1;
     const body = String(req.body.body || "").trim();
     const source = String(req.body.source || "Original").trim();
@@ -381,18 +409,18 @@ router.post("/", requireAuth(["doctor", "admin"]), async (req, res) => {
     const diagnosisExplanation = req.body.diagnosisExplanation
       ? String(req.body.diagnosisExplanation).trim() || null
       : null;
-    if (!title || !specialty || !body || questions.length === 0) {
-      return res.status(400).json({ error: "Title, specialty, body, and at least one question required" });
+    if (!title || specialtiesArr.length === 0 || !body || questions.length === 0) {
+      return res.status(400).json({ error: "Title, at least one specialty, body, and at least one question required" });
     }
     if (!diagnosis) {
       return res.status(400).json({ error: "Diagnosis is required (used to grade student answers)" });
     }
     const sourceKind = req.user.role === "admin" ? "admin" : "doctor";
     const { rows } = await query(
-      `INSERT INTO cases (title, specialty, level, body, questions, source, source_kind, uploader_id,
+      `INSERT INTO cases (title, specialty, specialties, level, body, questions, source, source_kind, uploader_id,
                           diagnosis, accepted_diagnoses, diagnosis_explanation)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10::jsonb,$11) RETURNING id`,
-      [title, specialty, level, body, JSON.stringify(questions), source, sourceKind, req.user.id,
+       VALUES ($1,$2,$3::text[],$4,$5,$6::jsonb,$7,$8,$9,$10,$11::jsonb,$12) RETURNING id`,
+      [title, specialtiesArr[0], specialtiesArr, level, body, JSON.stringify(questions), source, sourceKind, req.user.id,
        diagnosis, JSON.stringify(acceptedDiagnoses), diagnosisExplanation]
     );
     await query(
@@ -418,7 +446,20 @@ router.patch("/:id", requireAuth(["doctor", "admin"]), async (req, res) => {
     }
     const fields = [];
     const params = [];
-    for (const k of ["title", "specialty", "level", "body", "diagnosis", "diagnosis_explanation"]) {
+    // Multi-specialty edits: when the client sends `specialties` (array or
+    // comma-separated string), update both the array column and keep the
+    // legacy `specialty` column in sync with the first entry.
+    if (req.body.specialties !== undefined || req.body.specialty !== undefined) {
+      const arr = parseSpecialtyList(req.body.specialties, req.body.specialty);
+      if (arr.length === 0) {
+        return res.status(400).json({ error: "At least one specialty is required" });
+      }
+      params.push(arr);
+      fields.push(`specialties=$${params.length}::text[]`);
+      params.push(arr[0]);
+      fields.push(`specialty=$${params.length}`);
+    }
+    for (const k of ["title", "level", "body", "diagnosis", "diagnosis_explanation"]) {
       const camel = k === "diagnosis_explanation" ? "diagnosisExplanation" : k;
       const v = req.body[k] !== undefined ? req.body[k] : req.body[camel];
       if (v !== undefined) {

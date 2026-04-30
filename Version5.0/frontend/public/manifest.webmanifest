@@ -1,0 +1,17 @@
+{
+  "name": "Reasonal — Clinical Reasoning Trainer",
+  "short_name": "Reasonal",
+  "description": "Clinical reasoning trainer for medical students. Practice real patient cases and build diagnostic thinking with instant AI feedback.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FBFAF7",
+  "theme_color": "#1F9B71",
+  "lang": "en",
+  "categories": ["education", "medical", "productivity"],
+  "icons": [
+    { "src": "/logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

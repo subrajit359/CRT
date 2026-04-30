@@ -8,15 +8,16 @@ function readConfig() {
   const port = parseInt(process.env.SMTP_PORT || "0", 10);
   const user = process.env.SMTP_USER || "";
   const pass = process.env.SMTP_PASS || "";
-  const from =
-    process.env.SMTP_FROM ||
-    (user ? `Reasonal <${user}>` : "");
+  const rawFrom = process.env.SMTP_FROM || (user ? user : "");
+  // Always use a friendly display name; this helps Gmail trust the sender.
+  const from = /</.test(rawFrom) ? rawFrom : (rawFrom ? `Reasonal <${rawFrom}>` : "");
+  const replyTo = process.env.SMTP_REPLY_TO || rawFrom || user;
   const secure =
     typeof process.env.SMTP_SECURE === "string"
       ? /^(1|true|yes|on)$/i.test(process.env.SMTP_SECURE)
       : port === 465;
   const ready = !!(host && port && user && pass && from);
-  return { host, port, user, pass, from, secure, ready };
+  return { host, port, user, pass, from, replyTo, secure, ready };
 }
 
 function getTransporter(cfg) {
@@ -48,7 +49,7 @@ export async function verifyMailer() {
   }
 }
 
-export async function sendMail({ to, subject, text, html }) {
+export async function sendMail({ to, subject, text, html, headers }) {
   const cfg = readConfig();
   if (!cfg.ready) {
     const err = new Error(
@@ -58,7 +59,26 @@ export async function sendMail({ to, subject, text, html }) {
     throw err;
   }
   const t = getTransporter(cfg);
-  return t.sendMail({ from: cfg.from, to, subject, text, html });
+  // Mail headers that improve Gmail deliverability for transactional mail:
+  // - List-Unsubscribe lets recipients unsubscribe (Gmail treats senders without it more harshly).
+  // - Auto-Submitted + Precedence flag this as automated, not bulk marketing.
+  // - X-Entity-Ref-ID gives every message a unique identifier so it's not seen as duplicate spam.
+  const baseHeaders = {
+    "List-Unsubscribe": `<mailto:${cfg.replyTo}?subject=unsubscribe>`,
+    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    "Auto-Submitted": "auto-generated",
+    Precedence: "transactional",
+    "X-Entity-Ref-ID": `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+  };
+  return t.sendMail({
+    from: cfg.from,
+    replyTo: cfg.replyTo,
+    to,
+    subject,
+    text,
+    html,
+    headers: { ...baseHeaders, ...(headers || {}) },
+  });
 }
 
 export function buildOtpEmail({ code, purpose, ttlMinutes }) {
@@ -74,7 +94,7 @@ export function buildOtpEmail({ code, purpose, ttlMinutes }) {
       : purpose === "reset"
         ? "password reset"
         : "sign-in";
-  const subject = `Reasonal — your ${label} code: ${code}`;
+  const subject = `Your Reasonal ${label} code`;
   const text = [
     `Your Reasonal code is: ${code}`,
     ``,

@@ -98,7 +98,7 @@ export default function AdminCases() {
                   <div style={{ minWidth: 0, flex: "1 1 280px" }}>
                     <Link href={`/case/${c.id}`} style={{ fontWeight: 600 }}>{c.title}</Link>
                     <div className="muted small" style={{ marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <span>{c.specialty}</span>
+                      <span>{(c.specialties && c.specialties.length > 0 ? c.specialties : [c.specialty]).filter(Boolean).join(", ")}</span>
                       <span>· Level {c.level}</span>
                       <span>· by {c.uploader_name || c.uploader_username || "unknown"}</span>
                       <span>· {relativeTime(c.created_at)}</span>

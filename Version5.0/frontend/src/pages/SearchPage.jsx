@@ -163,7 +163,7 @@ export default function SearchPage() {
                   {cases.items.map((c) => (
                     <li key={c.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
                       <Link href={`/case/${c.id}`} className="clamp-2"><strong>{c.title}</strong></Link>
-                      <div className="muted small">{c.specialty} · Level {c.level}</div>
+                      <div className="muted small">{(c.specialties && c.specialties.length > 0 ? c.specialties : [c.specialty]).filter(Boolean).join(", ")} · Level {c.level}</div>
                     </li>
                   ))}
                 </ul>

@@ -8,7 +8,6 @@ import { useToast } from "../components/Toast.jsx";
 const ACCEPT = "image/png,image/jpeg,image/gif,image/webp,image/heic,application/pdf";
 const MAX_PER_FILE = 8 * 1024 * 1024;
 const MAX_FILES = 8;
-const CUSTOM_SPECIALTY = "__custom__";
 
 const BULK_TEMPLATE = `=== CASE ===
 Title: 60-year-old with sudden left-sided weakness
@@ -61,7 +60,8 @@ export default function CaseUpload() {
 
   // Single-case fields
   const [title, setTitle] = useState("");
-  const [specialty, setSpecialty] = useState("");
+  // Cases can be tagged with one or more specialties (no concept of "primary").
+  const [selectedSpecialties, setSelectedSpecialties] = useState([]);
   const [customSpecialty, setCustomSpecialty] = useState("");
   const [level, setLevel] = useState(3);
   const [body, setBody] = useState("");
@@ -123,10 +123,27 @@ export default function CaseUpload() {
   useEffect(() => {
     api.get("/api/cases/specialties").then((r) => {
       setSpecialties(r.specialties);
-      // Only pick a default if no draft restored a specialty.
-      setSpecialty((curr) => curr || r.specialties[0] || "");
     });
   }, []);
+
+  function toggleSpecialty(s) {
+    const v = String(s || "").trim();
+    if (!v) return;
+    setSelectedSpecialties((curr) => {
+      const i = curr.findIndex((x) => x.toLowerCase() === v.toLowerCase());
+      if (i >= 0) return curr.filter((_, idx) => idx !== i);
+      return [...curr, v];
+    });
+  }
+  function addCustomSpecialty() {
+    const v = customSpecialty.trim();
+    if (!v) return;
+    setSelectedSpecialties((curr) => {
+      if (curr.some((x) => x.toLowerCase() === v.toLowerCase())) return curr;
+      return [...curr, v];
+    });
+    setCustomSpecialty("");
+  }
 
   // ---- Draft autosave (single-case) ----
   const DRAFT_KEY = "reasonal:caseupload:draft:v1";
@@ -138,7 +155,8 @@ export default function CaseUpload() {
       if (!raw) return;
       const d = JSON.parse(raw);
       if (d.title) setTitle(d.title);
-      if (d.specialty) setSpecialty(d.specialty);
+      if (Array.isArray(d.selectedSpecialties)) setSelectedSpecialties(d.selectedSpecialties);
+      else if (d.specialty) setSelectedSpecialties([d.specialty]); // legacy draft
       if (d.customSpecialty) setCustomSpecialty(d.customSpecialty);
       if (d.level) setLevel(d.level);
       if (d.body) setBody(d.body);
@@ -157,14 +175,14 @@ export default function CaseUpload() {
         const hasContent = title || body || diagnosis || questionPrompt;
         if (!hasContent) return;
         localStorage.setItem(DRAFT_KEY, JSON.stringify({
-          title, specialty, customSpecialty, level, body,
+          title, selectedSpecialties, customSpecialty, level, body,
           questionPrompt, source, diagnosis, acceptedDiagnoses, diagnosisExplanation,
           savedAt: Date.now(),
         }));
       } catch {/* quota */}
     }, 600);
     return () => clearTimeout(t);
-  }, [title, specialty, customSpecialty, level, body, questionPrompt, source, diagnosis, acceptedDiagnoses, diagnosisExplanation]);
+  }, [title, selectedSpecialties, customSpecialty, level, body, questionPrompt, source, diagnosis, acceptedDiagnoses, diagnosisExplanation]);
 
   function clearDraft() {
     try { localStorage.removeItem(DRAFT_KEY); } catch {/* ignore */}
@@ -174,6 +192,7 @@ export default function CaseUpload() {
     clearDraft();
     setTitle(""); setBody(""); setQuestionPrompt(""); setDiagnosis("");
     setAcceptedDiagnoses(""); setDiagnosisExplanation(""); setCustomSpecialty("");
+    setSelectedSpecialties([]);
   }
 
   function onPickFiles(e) {
@@ -190,22 +209,28 @@ export default function CaseUpload() {
     setFiles((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  function resolveSpecialty() {
-    if (specialty === CUSTOM_SPECIALTY) return customSpecialty.trim();
-    return specialty;
+  function resolveSpecialties() {
+    // Include any text typed but not yet added to the chip list, so the user
+    // doesn't lose their entry by forgetting to press "Add".
+    const pending = customSpecialty.trim();
+    const all = [...selectedSpecialties];
+    if (pending && !all.some((x) => x.toLowerCase() === pending.toLowerCase())) {
+      all.push(pending);
+    }
+    return all;
   }
 
   async function submit(e) {
     e.preventDefault();
-    const finalSpecialty = resolveSpecialty();
-    if (!finalSpecialty) return toast.error("Pick or type a specialty");
+    const finalSpecialties = resolveSpecialties();
+    if (finalSpecialties.length === 0) return toast.error("Pick or add at least one specialty");
     if (body.trim().length < 80) return toast.error("Case body too short");
     if (!questionPrompt.trim()) return toast.error("Add at least one reasoning question");
     if (!diagnosis.trim()) return toast.error("Diagnosis is required (used to grade student answers)");
     setBusy(true);
     try {
       const r = await api.post("/api/cases", {
-        title, specialty: finalSpecialty, level: parseInt(level, 10), body, source,
+        title, specialties: finalSpecialties, level: parseInt(level, 10), body, source,
         questions: [{ prompt: questionPrompt, expectation: "" }],
         diagnosis: diagnosis.trim(),
         acceptedDiagnoses: acceptedDiagnoses.split(",").map((s) => s.trim()).filter(Boolean),
@@ -318,23 +343,81 @@ export default function CaseUpload() {
             </div>
 
             <div className="upload-grid">
-              <div className="field">
-                <label className="label">Specialty</label>
-                <select className="select" value={specialty} onChange={(e) => setSpecialty(e.target.value)} required>
-                  {specialties.map((s) => <option key={s} value={s}>{s}</option>)}
-                  <option value={CUSTOM_SPECIALTY}>Other (custom)…</option>
-                </select>
-                {specialty === CUSTOM_SPECIALTY && (
+              <div className="field" style={{ gridColumn: "1 / -1" }}>
+                <label className="label">
+                  Specialties
+                  <span className="muted small" style={{ marginLeft: 6 }}>
+                    (pick one or more — no primary)
+                  </span>
+                </label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                  {specialties.map((s) => {
+                    const on = selectedSpecialties.some((x) => x.toLowerCase() === s.toLowerCase());
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => toggleSpecialty(s)}
+                        aria-pressed={on}
+                        className="btn"
+                        style={{
+                          background: on ? "var(--primary)" : "transparent",
+                          color: on ? "#fff" : "var(--ink-800)",
+                          border: `1px solid ${on ? "var(--primary)" : "var(--line)"}`,
+                          borderRadius: 999,
+                          padding: "6px 12px",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {on ? "✓ " : ""}{s}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
                   <input
                     className="input"
-                    style={{ marginTop: 8 }}
-                    autoFocus
-                    required
                     value={customSpecialty}
                     onChange={(e) => setCustomSpecialty(e.target.value)}
-                    placeholder="Type the specialty name (e.g. Hematology)"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { e.preventDefault(); addCustomSpecialty(); }
+                    }}
+                    placeholder="Add another specialty (e.g. Hematology)"
                   />
+                  <button type="button" className="btn btn-secondary" onClick={addCustomSpecialty}>Add</button>
+                </div>
+                {selectedSpecialties.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                    {selectedSpecialties.map((s) => (
+                      <span
+                        key={s}
+                        className="badge"
+                        style={{
+                          background: "var(--primary)",
+                          color: "#fff",
+                          borderRadius: 999,
+                          padding: "4px 10px",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        {s}
+                        <button
+                          type="button"
+                          onClick={() => toggleSpecialty(s)}
+                          aria-label={`Remove ${s}`}
+                          style={{
+                            background: "transparent", color: "#fff", border: "none",
+                            cursor: "pointer", fontWeight: 700, padding: 0, lineHeight: 1,
+                          }}
+                        >×</button>
+                      </span>
+                    ))}
+                  </div>
                 )}
+                <div className="help">A case can be tagged with as many specialties as apply.</div>
               </div>
               <div className="field">
                 <label className="label">Level</label>
@@ -400,9 +483,41 @@ export default function CaseUpload() {
         {mode === "bulk" && (
           <form onSubmit={submitBulk} className="card">
             <div className="field">
-              <label className="label">Bulk paste</label>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <label className="label" style={{ marginBottom: 0 }}>Bulk paste</label>
+                <label className="btn btn-ghost btn-sm" style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <FileText size={14} strokeWidth={1.75} aria-hidden="true" />
+                  Upload .txt
+                  <input
+                    type="file"
+                    accept=".txt,text/plain"
+                    hidden
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!f) return;
+                      if (!/\.txt$/i.test(f.name) && f.type !== "text/plain") {
+                        return toast.error("Please choose a .txt file");
+                      }
+                      if (f.size > 5 * 1024 * 1024) {
+                        return toast.error("Text file is over 5 MB");
+                      }
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const text = String(reader.result || "").replace(/\r\n/g, "\n").trim();
+                        if (!text) return toast.error("That file is empty");
+                        if (bulkText.trim() && !window.confirm("Replace the current bulk text with the contents of this file?")) return;
+                        setBulkText(text);
+                        toast.success(`Loaded ${f.name}`);
+                      };
+                      reader.onerror = () => toast.error("Could not read that file");
+                      reader.readAsText(f);
+                    }}
+                  />
+                </label>
+              </div>
               <p className="muted small" style={{ marginTop: 4, marginBottom: 8 }}>
-                Paste many cases at once. Separate each case with a line that says <code>=== CASE ===</code>.
+                Paste many cases at once, or upload a <code>.txt</code> file using the button above. Separate each case with a line that says <code>=== CASE ===</code>.
                 Inside each block use the same fields as the single form: <strong>Title, Specialty, Level, Source, Body, Question, Diagnosis, Accepted, Explanation.</strong>
                 {" "}<button type="button" className="btn btn-ghost btn-sm" onClick={() => setBulkText(BULK_TEMPLATE)}>Insert example</button>
               </p>
@@ -415,7 +530,7 @@ export default function CaseUpload() {
                 placeholder={BULK_TEMPLATE}
                 style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13 }}
               />
-              <div className="help">Specialty can be any name — no need to match the dropdown list.</div>
+              <div className="help">Specialty can be any name — no need to match the dropdown list. Attachments below stay the same.</div>
             </div>
 
             <div className="field">

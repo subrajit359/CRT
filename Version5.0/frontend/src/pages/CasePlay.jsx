@@ -323,7 +323,9 @@ export default function CasePlay() {
         <div className="row-between play-head">
           <div>
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-              <span className="badge badge-primary">{c.specialty}</span>
+              {(c.specialties && c.specialties.length > 0 ? c.specialties : [c.specialty]).filter(Boolean).map((s) => (
+                <span key={s} className="badge badge-primary">{s}</span>
+              ))}
               <span className="badge">Level {c.level}</span>
               <span className="badge">Source: {c.source}</span>
               <VerifiedBadge count={verifyCount} />
