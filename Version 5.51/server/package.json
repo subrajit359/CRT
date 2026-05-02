@@ -1,0 +1,27 @@
+{
+  "name": "clinical-reasoning-trainer-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "NODE_ENV=production node index.js",
+    "dev": "node index.js",
+    "seed": "node seed.js",
+    "migrate": "node migrate.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.9.0",
+    "compression": "^1.8.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "express": "^4.21.2",
+    "multer": "^2.0.1",
+    "nodemailer": "^8.0.6",
+    "openai": "^4.95.1",
+    "pg": "^8.13.1",
+    "sharp": "^0.34.5",
+    "vite": "^5.4.10",
+    "web-push": "^3.6.7"
+  }
+}

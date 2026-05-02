@@ -1,0 +1,348 @@
+/* ============================================================
+   CrLearn — Responsive overrides
+   Loaded last. Fixes layout from tablet down to small phones.
+   ============================================================ */
+
+/* Prevent flex/grid children from creating horizontal scroll */
+*, *::before, *::after { min-width: 0; }
+html, body { overflow-x: hidden; }
+
+/* Long words/URLs inside user content can't push layout */
+.disc-msg-body,
+.case-body,
+.case-item,
+.eval-p,
+.empty,
+.help,
+.muted,
+.hero-case-body { overflow-wrap: anywhere; word-break: break-word; }
+
+/* Tables scroll horizontally inside their containing card on narrow screens */
+.card:has(> .table),
+.card:has(> form > .table) { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+@media (max-width: 760px) {
+  .table th, .table td { white-space: nowrap; }
+}
+
+/* ============================================================
+   Nav hamburger (≤ 1024px) — covers all phones (portrait + landscape)
+   and small tablets so the cramped desktop nav never appears on touch
+   devices.
+   ============================================================ */
+@media (max-width: 1024px) {
+  .nav-inner { gap: 8px; }
+
+  /* Mobile nav: dropdown buttons stack full-width for easier tapping.
+     Cap the dropdown's height so a long admin/doctor menu scrolls inside the
+     panel instead of running off the bottom of the screen. */
+  .nav-links {
+    max-height: calc(100vh - var(--nav-h) - env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav-user { width: 100%; padding-left: 0; gap: 8px; }
+  .nav-user .btn { flex: 1; min-height: 42px; }
+  .nav-user .nav-link { padding: 12px 8px; }
+  .nav-username { flex-wrap: nowrap; min-width: 0; }
+  .nav-username > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+}
+
+/* ============================================================
+   Tablet (≤ 880px) — non-nav layout adjustments
+   ============================================================ */
+@media (max-width: 880px) {
+  /* Auth-form panel — tighten when side panel disappears */
+  .auth-form-wrap { padding: var(--s-7) var(--s-5); }
+
+  /* Hero card — remove tilt artefact + lighter padding */
+  .hero-card { padding: var(--s-5); }
+  .hero-card::after { inset: 10px; border-radius: 14px; }
+
+  /* CTA strip stacks vertically with left-aligned button */
+  .cta-strip {
+    padding: var(--s-7);
+    flex-direction: column;
+    align-items: stretch;
+    text-align: left;
+  }
+  .cta-strip .btn { align-self: flex-start; }
+}
+
+/* ============================================================
+   Compact navbar (≤ 640px)
+   Brand mark + text + 3 icon buttons + burger have to share the bar.
+   ============================================================ */
+@media (max-width: 640px) {
+  .nav-inner { gap: 4px; }
+  .brand { gap: 8px; padding-right: 0; }
+  .brand-mark-img { width: 36px; height: 36px; border-radius: 8px; }
+  .brand-name-img { height: 24px; }
+  .brand-text { font-size: 18px; }
+  .nav-icons { gap: 0; }
+  .icon-btn { width: 36px; height: 36px; }
+  .icon-btn svg { width: 18px; height: 18px; }
+  .nav-burger { min-width: 40px; min-height: 40px; padding: 6px; }
+}
+
+/* Tighter still on very small phones */
+@media (max-width: 420px) {
+  .brand-text { display: none; }
+  .brand-name-img { height: 20px; }
+  .brand-mark-img { width: 32px; height: 32px; }
+  .icon-btn { width: 34px; height: 34px; }
+}
+
+/* ============================================================
+   Stacked play layout (≤ 980px) — disable sticky question box
+   It belongs to a side column when next to the case body.
+   Once the layout collapses, sticky is just a UX papercut.
+   ============================================================ */
+@media (max-width: 980px) {
+  .question-box { position: static; top: auto; }
+}
+
+/* ============================================================
+   Phone (≤ 640px)
+   ============================================================ */
+@media (max-width: 640px) {
+  .app-main { padding-block-start: var(--s-5); }
+  .container { padding-inline: 16px; }
+
+  /* Tighten spacer dividers so pages feel compact on phones */
+  .spacer-7 { height: var(--s-5); }
+  .spacer-9 { height: var(--s-7); }
+
+  /* Section spacing */
+  .section { padding-block: 48px; }
+
+  /* Buttons */
+  .btn-lg { padding: 14px 22px; font-size: 16px; }
+
+  /* Header + primary action: button takes full width when wrapping */
+  .row-between > .btn-primary,
+  .row-between > .btn-lg { width: 100%; }
+  .row-between > .row { width: 100%; }
+  .row-between > .row > .btn { flex: 1 1 auto; min-width: 0; }
+
+  /* Cards a little tighter */
+  .card { padding: var(--s-5); }
+
+  /* Hero */
+  .hero { padding-block: 56px 40px; }
+  .hero-meta { gap: 10px; font-size: 13px; }
+  .hero-card { padding: 18px; }
+  .hero-case-body { font-size: 14px; max-height: 200px; }
+  .hero-q { padding: 10px 12px; font-size: 14.5px; }
+  .hero-ctas .btn { flex: 1 1 100%; }
+
+  /* Question / Play column */
+  .question-box { padding: var(--s-5); }
+  .question-prompt { font-size: 18px; padding-left: 10px; }
+  .next-row { justify-content: space-between; }
+  .next-row .btn { flex: 1 1 auto; }
+
+  /* Evaluation panel */
+  .eval { padding: var(--s-5); }
+  .eval-header {
+    flex-wrap: wrap; gap: var(--s-4);
+    padding-bottom: var(--s-4); margin-bottom: var(--s-4);
+  }
+  .eval-score {
+    font-size: 38px; padding: 8px 14px;
+    min-width: 84px;
+  }
+  .eval-score-of { font-size: 14px; }
+  .eval-verdict-text { font-size: 17px; }
+
+  /* Case list cards */
+  .case-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: var(--s-4);
+  }
+  .case-item .badge { font-size: 11.5px; }
+
+  /* Profile head — center the avatar above the name on phones, let the
+     identity meta wrap cleanly, and don't let the message button squeeze
+     the heading. */
+  .profile-head {
+    gap: 14px;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .profile-head > div { width: 100%; }
+  .profile-head .row-between { flex-wrap: wrap; justify-content: center; gap: 10px; }
+  .profile-head h2 { margin-right: 0; font-size: 1.5rem; }
+  .profile-head .row { justify-content: center; flex-wrap: wrap; }
+  .avatar { width: 64px; height: 64px; font-size: 24px; }
+
+  /* Toast: edge-to-edge so it isn't a cramped corner */
+  .toast-stack { left: 12px; right: 12px; bottom: 12px; }
+  .toast { max-width: none; }
+
+  /* OTP code input — tighter spacing so 6 digits fit */
+  .code-input { letter-spacing: 5px; font-size: 20px; padding: 12px 10px; }
+
+  /* Stats */
+  .stat { padding: var(--s-4); }
+  .stat-value { font-size: 24px; }
+
+  /* Tables — denser */
+  .table th, .table td { padding: 10px 12px; font-size: 13.5px; }
+
+  /* Discussion message header wraps cleanly */
+  .disc-msg-head { flex-wrap: wrap; }
+  .disc-msg-when { margin-left: 0; width: 100%; }
+
+  /* Auth tighter still */
+  .auth-form-wrap { padding: var(--s-6) var(--s-4); }
+  .auth-tab { padding: 10px 8px; font-size: 13.5px; }
+
+  /* Footer */
+  .footer-inner { justify-content: flex-start; }
+  .footer-inner > * { width: 100%; }
+
+  /* Verify item rows */
+  ul .row-between { gap: 10px; }
+  ul .row-between > .btn { width: auto; flex: 0 0 auto; }
+}
+
+/* ============================================================
+   Question Bank header — buttons wrap on narrow screens
+   ============================================================ */
+@media (max-width: 640px) {
+  /* Header row: title takes full width, buttons spill to next row */
+  .mock-qs-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .mock-qs-header-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+/* ============================================================
+   Small phone (≤ 380px)
+   ============================================================ */
+@media (max-width: 380px) {
+  .brand-text { display: none; }
+  .btn { padding: 11px 16px; }
+  .btn-sm { padding: 7px 11px; font-size: 13.5px; }
+  .btn-lg { padding: 13px 18px; font-size: 15.5px; }
+  .code-input { letter-spacing: 3px; font-size: 18px; }
+  .eval-score { font-size: 32px; min-width: 72px; }
+  .stat-value { font-size: 22px; }
+  h2 { font-size: 1.45rem; }
+  .question-prompt { font-size: 16.5px; }
+}
+
+/* ============================================================
+   Modals — make sure they never exceed viewport on mobile
+   The Modal component already pads the overlay by 20px; we cap
+   the dialog height so long content scrolls inside instead of
+   pushing the page.
+   ============================================================ */
+@media (max-width: 640px) {
+  /* The Modal in CasePlay sets maxWidth:480 inline; we need to
+     constrain its height. Match by class shape used inline. */
+  [style*="position: fixed"][style*="inset: 0"] > .card {
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+  }
+}
+
+/* ============================================================
+   AttachmentViewer — mobile responsive
+   ============================================================ */
+@media (max-width: 640px) {
+  /* Header: reduce gap + padding so filename isn't squeezed */
+  .av-header { gap: 6px; padding: 8px 10px; }
+
+  /* Hide the file-type icon to save space */
+  .av-header-icon { display: none; }
+
+  /* Hide button labels — icon alone is enough on small screens */
+  .av-btn-text { display: none; }
+
+  /* Shrink action buttons to icon-only pill */
+  .av-action-btn { padding: 6px 8px; min-width: 34px; justify-content: center; }
+
+  /* Nav arrows: smaller, moved closer to edges so they don't cover content */
+  .av-nav { width: 36px; height: 48px; border-radius: 8px; }
+  .av-nav-prev { left: 6px; }
+  .av-nav-next { right: 6px; }
+
+  /* Unsupported fallback: tighter padding */
+  .av-unsupported { padding: 24px 20px; }
+}
+
+@media (max-width: 380px) {
+  /* Very small phones — remove meta info from header */
+  .av-meta { display: none; }
+}
+
+/* ============================================================
+   Dx attachment grid — smaller thumbnails on phones
+   ============================================================ */
+@media (max-width: 480px) {
+  .dx-att-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .dx-att-preview { height: 110px; }
+}
+
+@media (max-width: 360px) {
+  .dx-att-grid { grid-template-columns: 1fr; }
+}
+
+/* ============================================================
+   DxTopicPage card — tighter padding on phones
+   ============================================================ */
+@media (max-width: 640px) {
+  .dx-att-info { padding: 8px 10px 10px; }
+  .dx-att-name { font-size: 11.5px; }
+}
+
+/* ============================================================
+   Study — blog & article responsive overrides
+   ============================================================ */
+@media (max-width: 640px) {
+  .study-blog-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .study-article-title { font-size: 22px; }
+  .study-article-cover { aspect-ratio: 16 / 7; }
+
+  .study-section-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .study-section-browse-btn {
+    align-self: flex-start;
+  }
+
+  .study-res-item-row {
+    flex-wrap: wrap;
+  }
+  .study-res-item-actions {
+    width: 100%;
+    padding-left: 38px;
+    padding-top: 4px;
+  }
+
+  .study-search-row-main {
+    flex-wrap: wrap;
+  }
+  .study-search-row-actions {
+    width: 100%;
+    padding-left: 46px;
+    padding-bottom: 10px;
+  }
+}
