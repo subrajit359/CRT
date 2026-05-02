@@ -1,0 +1,23 @@
+[build]
+  publish = "dist"
+  command = "npm install --no-audit --no-fund && npm run build"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NPM_FLAGS    = "--no-audit --no-fund"
+
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/notification-icon.png"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+    Service-Worker-Allowed = "/"

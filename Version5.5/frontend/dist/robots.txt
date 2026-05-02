@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+Disallow: /api/
+Disallow: /admin
+Disallow: /admin/
+Disallow: /settings
+
+Sitemap: https://crlearn.online/sitemap.xml
