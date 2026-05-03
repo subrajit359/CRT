@@ -5,8 +5,6 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Shared / default credentials (used as a fallback for any task-specific
-// client that doesn't have its own key configured).
 const sharedBaseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
 const sharedApiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
 
@@ -16,11 +14,6 @@ if (!sharedBaseURL || !sharedApiKey) {
   );
 }
 
-// Build a task-scoped OpenAI client.
-//   prefix = "ASSISTANT" | "MATCH" | "EVAL" | "CASE"
-// Looks for {PREFIX}_OPENAI_API_KEY and {PREFIX}_OPENAI_BASE_URL,
-// falling back to the shared AI_INTEGRATIONS_OPENAI_* values so the app
-// keeps working until you provide dedicated keys.
 function makeClient(prefix) {
   const apiKey = process.env[`${prefix}_OPENAI_API_KEY`] || sharedApiKey;
   const baseURL = process.env[`${prefix}_OPENAI_BASE_URL`] || sharedBaseURL;
@@ -36,21 +29,57 @@ function makeClient(prefix) {
   });
 }
 
-// Four task-scoped clients — each can run on its own provider/key.
-export const assistantOpenai = makeClient("ASSISTANT"); // Dr. Rio chat
-export const matchOpenai = makeClient("MATCH"); // semantic diagnosis matching
-export const evalOpenai = makeClient("EVAL"); // answer evaluation / grading
-export const caseOpenai = makeClient("CASE"); // case generation
+export const assistantOpenai = makeClient("ASSISTANT");
+export const matchOpenai = makeClient("MATCH");
+export const evalOpenai = makeClient("EVAL");
+export const caseOpenai = makeClient("CASE");
+export const coachOpenai = new OpenAI({
+  baseURL: process.env.AI_COACH_OPENAI_BASE_URL || process.env.CASE_OPENAI_BASE_URL || sharedBaseURL,
+  apiKey: process.env.AI_COACH_OPENAI_API_KEY || process.env.CASE_OPENAI_API_KEY || sharedApiKey || "missing",
+  defaultQuery: process.env.AI_COACH_MODEL ? { model: process.env.AI_COACH_MODEL } : undefined,
+});
 
-// Backward-compatible default export — points at the shared credentials.
-// Existing imports of `openai` keep working; new code should pick the
-// task-specific client above.
+// Groq fallback client — used when the primary case client (Gemini) is rate-limited.
+// Reuses ASSISTANT credentials which already point to Groq.
+export const groqFallbackOpenai = new OpenAI({
+  baseURL: process.env.ASSISTANT_OPENAI_BASE_URL || sharedBaseURL,
+  apiKey: process.env.ASSISTANT_OPENAI_API_KEY || sharedApiKey || "missing",
+});
+
 export const openai = new OpenAI({
   baseURL: sharedBaseURL,
   apiKey: sharedApiKey || "missing",
 });
 
+// ── Prompt cache — loaded once at startup, never re-read from disk ──────────
+const _promptCache = new Map();
+const promptsDir = path.join(__dirname, "prompts");
+
+function _warmPromptCache() {
+  try {
+    const files = fs.readdirSync(promptsDir);
+    for (const f of files) {
+      if (!f.endsWith(".txt")) continue;
+      try {
+        const content = fs.readFileSync(path.join(promptsDir, f), "utf8");
+        _promptCache.set(f, content);
+        console.log(`[openai] prompt cached: ${f}`);
+      } catch (e) {
+        console.warn(`[openai] could not cache prompt ${f}: ${e.message}`);
+      }
+    }
+  } catch (e) {
+    console.warn(`[openai] prompts dir unreadable: ${e.message}`);
+  }
+}
+
+_warmPromptCache();
+
 export function loadPrompt(name) {
-  const p = path.join(__dirname, "prompts", name);
-  return fs.readFileSync(p, "utf8");
+  if (_promptCache.has(name)) return _promptCache.get(name);
+  // Fallback: read from disk if somehow not cached (e.g. new file added at runtime)
+  const p = path.join(promptsDir, name);
+  const content = fs.readFileSync(p, "utf8");
+  _promptCache.set(name, content);
+  return content;
 }

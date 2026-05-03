@@ -1,10 +1,33 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
-import { TrendingUp, TrendingDown, Minus, ChevronLeft, ChevronRight, Award, AlertCircle, BarChart2, BookOpen } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, ChevronLeft, ChevronRight, Award, AlertCircle, BarChart2, BookOpen, Star, RefreshCw, Trophy, Zap, Hospital, Search, ClipboardList, Target, Flame, Dumbbell, Globe, Layers, GraduationCap, Brain, Sparkles, Moon, Sunrise } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
 import { api } from "../lib/api.js";
 
 const PAGE_SIZE = 10;
+
+const CATEGORY_ORDER = ["Milestone", "Score", "Streak", "Specialty", "Mastery", "Improvement", "Time"];
+
+const ACHIEVEMENT_ICONS = {
+  Hospital,
+  Search,
+  ClipboardList,
+  Award,
+  Star,
+  Target,
+  TrendingUp,
+  Flame,
+  Dumbbell,
+  Trophy,
+  Globe,
+  Layers,
+  GraduationCap,
+  RefreshCw,
+  Brain,
+  Sparkles,
+  Moon,
+  Sunrise,
+};
 
 function ScoreBadge({ score }) {
   const cls = score >= 8 ? "badge-success" : score >= 5 ? "badge-warning" : "badge-danger";
@@ -32,10 +55,12 @@ export default function Progress() {
   const [stats, setStats] = useState(null);
   const [history, setHistory] = useState([]);
   const [page, setPage] = useState(1);
+  const [achieveData, setAchieveData] = useState(null);
 
   useEffect(() => {
     api.get("/api/eval/stats").then(setStats).catch(() => {});
     api.get("/api/eval/history").then((r) => setHistory(r.responses || [])).catch(() => {});
+    api.get("/api/achievements").then(setAchieveData).catch(() => {});
   }, []);
 
   const totalPages = Math.max(1, Math.ceil(history.length / PAGE_SIZE));
@@ -259,6 +284,91 @@ export default function Progress() {
             )}
           </div>
         </div>
+
+        {/* ── Achievements ─────────────────────────────────────────────── */}
+        {achieveData && (
+          <>
+            <div className="spacer-7" />
+            <div className="card">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Trophy size={18} color="var(--primary)" />
+                  <h3 style={{ margin: 0 }}>Achievements</h3>
+                  <span className="badge" style={{ background: "var(--primary)", color: "white" }}>
+                    {achieveData.unlockedCount} / {achieveData.totalCount}
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <Zap size={14} color="#d97706" />
+                  <span style={{ fontWeight: 700, fontSize: 15 }}>{(achieveData.xp ?? 0).toLocaleString()} XP</span>
+                </div>
+              </div>
+
+              {/* XP progress bar */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ height: 6, borderRadius: 99, background: "var(--line)", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      width: `${achieveData.totalCount > 0 ? Math.round((achieveData.unlockedCount / achieveData.totalCount) * 100) : 0}%`,
+                      height: "100%",
+                      background: "var(--primary)",
+                      borderRadius: 99,
+                      transition: "width 0.5s ease",
+                    }}
+                  />
+                </div>
+                <div className="muted small" style={{ marginTop: 4 }}>
+                  {achieveData.totalCount > 0
+                    ? `${Math.round((achieveData.unlockedCount / achieveData.totalCount) * 100)}% complete`
+                    : "0% complete"}
+                </div>
+              </div>
+
+              {/* Grid grouped by category */}
+              {CATEGORY_ORDER.map((cat) => {
+                const group = (achieveData.achievements || []).filter((a) => a.category === cat);
+                if (!group.length) return null;
+                return (
+                  <div key={cat} style={{ marginBottom: 20 }}>
+                    <div className="muted small" style={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>{cat}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
+                      {group.map((a) => (
+                        <div
+                          key={a.key}
+                          title={a.unlocked ? `Unlocked ${new Date(a.unlocked_at).toLocaleDateString()}` : a.desc}
+                          style={{
+                            padding: "10px 12px",
+                            borderRadius: 10,
+                            border: `1.5px solid ${a.unlocked ? "var(--primary)" : "var(--line)"}`,
+                            background: a.unlocked ? "var(--primary-tint, rgba(99,102,241,0.07))" : "var(--surface-2, var(--bg))",
+                            opacity: a.unlocked ? 1 : 0.5,
+                            transition: "opacity 0.2s",
+                            position: "relative",
+                          }}
+                        >
+                          <div style={{ marginBottom: 4 }}>
+                            {(() => {
+                              const Icon = ACHIEVEMENT_ICONS[a.icon] || Trophy;
+                              return <Icon size={22} strokeWidth={2} color="var(--primary)" />;
+                            })()}
+                          </div>
+                          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>{a.title}</div>
+                          <div className="muted small" style={{ fontSize: 11, lineHeight: 1.3 }}>{a.desc}</div>
+                          <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: a.unlocked ? "var(--primary)" : "var(--ink-400)" }}>
+                            +{a.xp} XP
+                          </div>
+                          {a.unlocked && (
+                            <div style={{ position: "absolute", top: 8, right: 8, width: 8, height: 8, borderRadius: "50%", background: "var(--primary)" }} />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </AppShell>
   );

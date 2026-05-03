@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Mail, Clock, CheckCircle } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
 import { Link } from "wouter";
 
@@ -62,14 +63,14 @@ export default function Contact() {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 32 }}>
           {[
-            { icon: "✉️", label: "Email", value: "clinicalreasoningofficial@gmail.com" },
-            { icon: "🕐", label: "Response time", value: "Within 24 hours" },
-          ].map(({ icon, label, value }) => (
+            { Icon: Mail,  label: "Email", value: "clinicalreasoningofficial@gmail.com" },
+            { Icon: Clock, label: "Response time", value: "Within 24 hours" },
+          ].map(({ Icon, label, value }) => (
             <div key={label} style={{
               background: "var(--bg-elev)", border: "1px solid var(--line)",
               borderRadius: 14, padding: "18px 20px",
             }}>
-              <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>
+              <div style={{ marginBottom: 6, color: "var(--primary)" }}><Icon size={22} strokeWidth={1.75} /></div>
               <div style={{ fontSize: 12, color: "var(--ink-400)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{label}</div>
               <div style={{ fontSize: 14, color: "var(--ink-800)", fontWeight: 600 }}>{value}</div>
             </div>
@@ -81,7 +82,7 @@ export default function Contact() {
             background: "rgba(5,150,105,0.08)", border: "1.5px solid rgba(5,150,105,0.25)",
             borderRadius: 18, padding: "36px 32px", textAlign: "center",
           }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+            <div style={{ marginBottom: 12, color: "#059669" }}><CheckCircle size={40} strokeWidth={1.5} /></div>
             <h2 style={{ margin: "0 0 8px", fontSize: 20, fontWeight: 700, color: "var(--ink-900)" }}>Message sent!</h2>
             <p style={{ margin: 0, color: "var(--ink-500)", fontSize: 14 }}>
               Thanks for reaching out. We'll get back to you within 24 hours.

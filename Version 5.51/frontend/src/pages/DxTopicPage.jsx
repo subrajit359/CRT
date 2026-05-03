@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "wouter";
 import {
   Brain, ChevronRight, Paperclip, Edit3, Save, X, Upload, Trash2,
+  Image, FileText, BarChart2, FileEdit, Sheet,
 } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
 import { api } from "../lib/api.js";
@@ -10,14 +11,14 @@ import { useAuth } from "../lib/auth.jsx";
 import { useToast } from "../components/Toast.jsx";
 
 // Classify file for a friendly icon
-function fileEmoji(att) {
+function fileIcon(att) {
   const fn = (att.filename || "").toLowerCase();
-  if (att.kind === "image" || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(fn)) return "🖼";
-  if (att.kind === "pdf"   || fn.endsWith(".pdf")) return "📄";
-  if (/\.(pptx?|key|odp)$/i.test(fn)) return "📊";
-  if (/\.(docx?|rtf|odt)$/i.test(fn)) return "📝";
-  if (/\.(xlsx?|ods|csv)$/i.test(fn)) return "📋";
-  return "📎";
+  if (att.kind === "image" || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(fn)) return <Image size={38} strokeWidth={1.25} />;
+  if (att.kind === "pdf"   || fn.endsWith(".pdf"))                           return <FileText size={38} strokeWidth={1.25} />;
+  if (/\.(pptx?|key|odp)$/i.test(fn))                                       return <BarChart2 size={38} strokeWidth={1.25} />;
+  if (/\.(docx?|rtf|odt)$/i.test(fn))                                       return <FileEdit size={38} strokeWidth={1.25} />;
+  if (/\.(xlsx?|ods|csv)$/i.test(fn))                                       return <Sheet size={38} strokeWidth={1.25} />;
+  return <Paperclip size={38} strokeWidth={1.25} />;
 }
 
 function isImage(att) {
@@ -294,7 +295,7 @@ export default function DxTopicPage() {
                             />
                           ) : (
                             <div className="dx-att-file-icon">
-                              <span style={{ fontSize: 38, lineHeight: 1 }}>{fileEmoji(a)}</span>
+                              <span style={{ lineHeight: 1, color: "var(--ink-400)" }}>{fileIcon(a)}</span>
                               <span className="dx-att-ext">
                                 {(a.filename || "").split(".").pop().toUpperCase()}
                               </span>

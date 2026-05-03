@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useLocation } from "wouter";
-import { MessageSquare } from "lucide-react";
+import {
+  MessageSquare, Trophy, Zap,
+  Hospital, Search, ClipboardList, Award, Star, Target, TrendingUp,
+  Flame, Dumbbell, Globe, Layers, GraduationCap, RefreshCw, Brain,
+  Sparkles, Moon, Sunrise,
+} from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
 import Avatar from "../components/Avatar.jsx";
 import Pagination from "../components/Pagination.jsx";
@@ -11,6 +16,27 @@ import useUrlPaging from "../lib/usePaging.js";
 import { shortDate } from "../lib/date.js";
 import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
+
+const ACHIEVEMENT_META = {
+  first_steps:      { Icon: Hospital,      title: "First Steps",        xp: 100  },
+  case_explorer:    { Icon: Search,        title: "Case Explorer",      xp: 200  },
+  case_veteran:     { Icon: ClipboardList, title: "Case Veteran",       xp: 500  },
+  centurion:        { Icon: Award,         title: "Centurion",          xp: 1000 },
+  perfect_score:    { Icon: Star,          title: "Perfect Score",      xp: 300  },
+  high_achiever:    { Icon: Target,        title: "High Achiever",      xp: 300  },
+  consistent:       { Icon: TrendingUp,    title: "Consistent",         xp: 400  },
+  three_day_streak: { Icon: Flame,         title: "On Fire",            xp: 150  },
+  week_warrior:     { Icon: Dumbbell,      title: "Week Warrior",       xp: 300  },
+  monthly_legend:   { Icon: Trophy,        title: "Monthly Legend",     xp: 1000 },
+  all_rounder:      { Icon: Globe,         title: "All-Rounder",        xp: 250  },
+  jack_of_all:      { Icon: Layers,        title: "Jack of All Trades", xp: 400  },
+  specialist:       { Icon: GraduationCap, title: "Specialist",         xp: 500  },
+  first_review:     { Icon: RefreshCw,     title: "Recall Ready",       xp: 100  },
+  memory_master:    { Icon: Brain,         title: "Memory Master",      xp: 500  },
+  comeback:         { Icon: Sparkles,      title: "Comeback Kid",       xp: 300  },
+  night_owl:        { Icon: Moon,          title: "Night Owl",          xp: 50   },
+  early_bird:       { Icon: Sunrise,       title: "Early Bird",         xp: 50   },
+};
 
 function LevelProgressBar({ level, overallPct }) {
   return (
@@ -49,6 +75,12 @@ function paginate(arr, page, pageSize) {
   return { items: (arr || []).slice(start, start + pageSize), total };
 }
 
+function getAchievementIcon(meta) {
+  if (typeof meta?.Icon === "function") return meta.Icon;
+  if (typeof meta?.icon === "function") return meta.icon;
+  return Trophy;
+}
+
 export default function Profile() {
   const params = useParams();
   const [, navigate] = useLocation();
@@ -59,6 +91,9 @@ export default function Profile() {
 
   const uploadedPaging = useUrlPaging({ enabled: false, defaultPageSize: 10 });
   const verificationsPaging = useUrlPaging({ enabled: false, defaultPageSize: 10 });
+  const [showAllBadges, setShowAllBadges] = useState(false);
+
+  const BADGE_PREVIEW = 6;
 
   function load() {
     setError(null); setData(null);
@@ -140,6 +175,69 @@ export default function Profile() {
             )}
           </div>
         </div>
+
+        {/* ── Student achievements section ─────────────────────────────── */}
+        {u.role === "student" && (data.achievements?.length > 0 || data.xp > 0) && (
+          <div className="card" style={{ marginTop: 24 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Trophy size={16} color="var(--primary)" />
+                <strong>Achievements</strong>
+                {data.achievements?.length > 0 && (
+                  <span className="badge" style={{ background: "var(--primary)", color: "white" }}>
+                    {data.achievements.length}
+                  </span>
+                )}
+              </div>
+              {data.xp > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <Zap size={13} color="#d97706" />
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>{data.xp.toLocaleString()} XP</span>
+                </div>
+              )}
+            </div>
+            {data.achievements?.length > 0 ? (
+              <>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {(showAllBadges ? data.achievements : data.achievements.slice(0, BADGE_PREVIEW)).map((a) => {
+                    const meta = ACHIEVEMENT_META[a.key];
+                    if (!meta) return null;
+                    const Icon = getAchievementIcon(meta);
+                    return (
+                      <div
+                        key={a.key}
+                        title={`${meta.title} — unlocked ${new Date(a.unlocked_at).toLocaleDateString()}`}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 6,
+                          padding: "6px 10px", borderRadius: 8,
+                          border: "1.5px solid var(--primary)",
+                          background: "var(--primary-tint, rgba(99,102,241,0.07))",
+                          fontSize: 13, fontWeight: 600,
+                        }}
+                      >
+                        <Icon size={15} strokeWidth={2} color="var(--primary)" />
+                        {meta.title}
+                      </div>
+                    );
+                  })}
+                </div>
+                {data.achievements.length > BADGE_PREVIEW && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setShowAllBadges((v) => !v)}
+                    style={{ marginTop: 10, fontSize: 12 }}
+                  >
+                    {showAllBadges
+                      ? "Show less"
+                      : `Show ${data.achievements.length - BADGE_PREVIEW} more badge${data.achievements.length - BADGE_PREVIEW !== 1 ? "s" : ""}`}
+                  </button>
+                )}
+              </>
+            ) : (
+              <p className="muted small" style={{ margin: 0 }}>No achievements unlocked yet.</p>
+            )}
+          </div>
+        )}
 
         {u.role === "doctor" && (
           <div className="dash-grid">

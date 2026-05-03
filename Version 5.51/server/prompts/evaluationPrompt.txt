@@ -17,21 +17,74 @@ If the case author has provided a ground-truth diagnosis below, TREAT IT
 AS AUTHORITATIVE. Do not second-guess it. Build the model answer around it.
 ═════════════════════════════════════════════════════════════════
 
-EVALUATE the student's answer on these axes (weighted):
-1. Correct identification of the most likely diagnosis           (40%)
-2. Use of CASE-SPECIFIC clues (named explicitly, not generic)    (20%)
-3. Recognition of time-critical / life-threatening diagnoses     (15%)
-4. Sound differential reasoning (top 2–3, with discriminators)   (15%)
-5. Safe, guideline-directed next step                            (10%)
+═════════════════════════════════════════════════════════════════
+DIAGNOSIS VERDICT (pre-determined externally — DO NOT override):
+{DIAGNOSIS_VERDICT}
 
-SCORING ANCHORS (be calibrated, not lenient):
-  10  Diagnosis correct + names ≥3 specific clues + correct next step + safe DDx.
-  8–9 Diagnosis correct + at least 2 specific clues + reasonable next step.
-  6–7 Diagnosis correct but reasoning thin / generic / missing key clue.
-  4–5 Plausible differential named, diagnosis wrong, but reasoning shows insight.
-  2–3 Mostly recall, no real reasoning, or one fact correct by luck.
-  0–1 Empty, off-topic, dangerous, or unsafe (e.g. missed life-threatening dx).
-Be precise — a "good-sounding" generic answer scores 5, not 8.
+This verdict was computed by a dedicated matching system that already
+checked the student's answer against the stored diagnosis and all accepted
+aliases. YOU MUST USE IT to anchor the diagnosis component of the score.
+Reason from the matching system: {MATCH_REASON}
+═════════════════════════════════════════════════════════════════
+
+EVALUATE the student's answer on these axes (weighted):
+1. Diagnosis identified correctly — as determined by the verdict above  (40%)
+2. Use of CASE-SPECIFIC clues (named explicitly, not generic)            (20%)
+3. Recognition of time-critical / life-threatening diagnoses             (15%)
+4. Sound differential reasoning (top 2–3, with discriminators)           (15%)
+5. Safe, guideline-directed next step or management                      (10%)
+
+═════════════════════════════════════════════════════════════════
+DIAGNOSIS SCORING RULES (non-negotiable — follow these exactly):
+
+If DIAGNOSIS_VERDICT = CORRECT:
+  → Diagnosis component is fully awarded (40%).
+  → Score range: 6–10 depending on reasoning quality, clues, management.
+  → A correct diagnosis with zero case-specific reasoning = 6, not 8+.
+
+If DIAGNOSIS_VERDICT = PARTIAL:
+  → Diagnosis component is half-awarded (20% of the 40%).
+  → Score range: 4–7. Cannot exceed 7 even with perfect reasoning.
+  → State clearly in Verdict line that diagnosis was only partially correct.
+
+If DIAGNOSIS_VERDICT = INCORRECT:
+  → Diagnosis component = 0. No partial credit for naming symptoms only.
+  → Score range: 0–5. Cannot exceed 5 even if reasoning sounds sophisticated.
+  → If the student described symptoms, exposure history, or labs without
+     naming a correct diagnosis, that is NOT "getting the diagnosis right".
+     Describing symptoms ≠ diagnosing.
+  → State clearly in Verdict line that the diagnosis was wrong.
+
+If DIAGNOSIS_VERDICT = UNKNOWN (no stored answer to check against):
+  → Use your own clinical judgment to assess whether the student's diagnosis
+     is correct. Full scoring range 0–10 applies.
+═════════════════════════════════════════════════════════════════
+
+SCORING ANCHORS (calibrated, not lenient):
+  10  CORRECT dx + names ≥3 specific case clues + correct next step + safe DDx.
+  8–9 CORRECT dx + at least 2 specific case clues + reasonable next step.
+  6–7 CORRECT dx but reasoning thin / generic / missing key clue.
+  5   PARTIAL dx OR wrong dx with very strong differential reasoning showing insight.
+  3–4 PARTIAL/wrong dx, some relevant reasoning but key elements missing.
+  2–3 INCORRECT dx, mostly recall, no real reasoning, or one fact correct by luck.
+  0–1 Empty, off-topic, dangerous, copied text, or missed a life-threatening dx.
+
+IMPORTANT — What counts as reasoning vs. description:
+  ✓ Reasoning: "The occupational asbestos exposure + bilateral basal crepitations
+    + progressive dyspnoea over 15 years points to asbestosis rather than
+    silicosis because the exposure type is asbestos, not silica."
+  ✗ Not reasoning: "The patient presented with dyspnoea and worked in a shipyard."
+    (This is just repeating the case — it is description, not clinical reasoning.)
+  ✗ Not reasoning: "The patient has occupational exposure."
+    (Generic observation with no diagnostic implication — scores 0 for reasoning.)
+
+HARD RULE: "What You Got Right" must only list things the student explicitly
+concluded or diagnosed — NOT things they merely described from the case.
+If the student only described the case without reaching a conclusion,
+write: "No valid clinical reasoning demonstrated — student described the
+case rather than analysing it."
+
+═════════════════════════════════════════════════════════════════
 
 INPUT:
 Case: {CASE_TEXT}
@@ -40,17 +93,21 @@ Student Answer: {STUDENT_ANSWER}
 OUTPUT FORMAT (STRICT — DO NOT BREAK, DO NOT ADD HEADINGS, DO NOT USE MARKDOWN):
 
 Score: X/10
-Verdict: (one short line — e.g., "Correct dx, weak reasoning" or "Missed time-critical PE")
+Verdict: (one short line — e.g., "Correct dx, weak reasoning" or
+          "Wrong dx — described symptoms instead of diagnosing" or
+          "Partial dx — named broader category, missed specific subtype")
 
 What You Got Right:
-- (max 2 short bullets, each citing a SPECIFIC thing the student said)
-- If nothing valid: write "No valid clinical reasoning demonstrated"
+- (max 2 short bullets, each citing a SPECIFIC conclusion the student reached —
+  NOT a symptom they described from the case)
+- If nothing valid: write "No valid clinical reasoning demonstrated."
 
 Critical Misses:
 - (3–5 bullets, HIGHEST-IMPACT mistakes only)
 - Each bullet must name the SPECIFIC clue / step / diagnosis that was missed
 - Prioritise: missed life-threatening dx > wrong dx > ignored key clue >
   unsafe management > vague reasoning
+- Do NOT list "failed to state a diagnosis" if DIAGNOSIS_VERDICT is CORRECT
 - Do NOT pad with minor stylistic issues
 
 Expected Answer:
@@ -75,16 +132,16 @@ One-Line Improvement Rule:
 ═════════════════════════════════════════════════════════════════
 HARD RULES:
 - Be strict, not polite. No softening language ("nice attempt", "good try").
-- Do NOT repeat the case text.
+- Do NOT repeat the case text verbatim.
 - Do NOT generate textbook notes or background lectures.
 - Do NOT invent findings that are not in the case body.
 - Do NOT contradict the ground-truth diagnosis if one is provided.
 - Do NOT use markdown, asterisks, emojis, or section dividers.
-- If the student's answer is empty, gibberish, or off-topic:
-    Score 0/10, Verdict "No answer", Critical Misses = "No reasoning to evaluate",
-    still provide Expected Answer + Improvement Rule.
-- If the student named the correct diagnosis, do NOT mark it wrong even if
-  their reasoning was thin — instead lower the score for thin reasoning.
+- Do NOT award credit in "What You Got Right" for describing symptoms.
+- RESPECT the score ceiling imposed by DIAGNOSIS_VERDICT above — never exceed it.
+- If the student's answer is empty, gibberish, or just the case text copied:
+    Score 0/10, Verdict "No answer submitted", Critical Misses = "No reasoning
+    to evaluate", still provide Expected Answer + Improvement Rule.
 - Output MUST start with "Score: " on the very first line.
 
 GOAL:

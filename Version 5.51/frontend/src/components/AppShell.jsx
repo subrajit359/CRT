@@ -179,6 +179,7 @@ export default function AppShell({ children }) {
             {!user && <Link href="/blog" className={`nav-link ${isActive(location, "/blog") ? "is-active" : ""}`}>Blog</Link>}
             {isStudent && <Link href="/practice" className={`nav-link ${isActive(location, "/practice") ? "is-active" : ""}`}>Practice</Link>}
             {isStudent && <Link href="/progress" className={`nav-link ${isActive(location, "/progress") ? "is-active" : ""}`}>Progress</Link>}
+            {isStudent && <Link href="/insights" className={`nav-link ${isActive(location, "/insights") ? "is-active" : ""}`}>Insights</Link>}
             {isStudent && <Link href="/level-practice" className={`nav-link ${isActive(location, "/level-practice") ? "is-active" : ""}`}>Level Practice</Link>}
             {user && <Link href="/mock" className={`nav-link ${isActive(location, "/mock") ? "is-active" : ""}`}>Mock Test</Link>}
             {user && <Link href="/study" className={`nav-link ${isActive(location, "/study") ? "is-active" : ""}`}>Study</Link>}
@@ -222,12 +223,14 @@ export default function AppShell({ children }) {
                   />
                   <span style={{ marginLeft: 8 }}>@{user.username}</span>
                 </Link>
-                <Link href="/settings" className={`nav-link ${isActive(location, "/settings") ? "is-active" : ""}`} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                  <Settings size={15} strokeWidth={1.75} aria-hidden="true" />Settings
-                </Link>
-                <button className="nav-link nav-link-btn" onClick={logout} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer" }}>
-                  <LogOut size={15} strokeWidth={1.75} aria-hidden="true" />Sign out
-                </button>
+                <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
+                  <Link href="/settings" className={`nav-link ${isActive(location, "/settings") ? "is-active" : ""}`} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <Settings size={15} strokeWidth={1.75} aria-hidden="true" />Settings
+                  </Link>
+                  <button className="nav-link nav-link-btn" onClick={logout} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer" }}>
+                    <LogOut size={15} strokeWidth={1.75} aria-hidden="true" />Sign out
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="nav-user">
@@ -245,8 +248,9 @@ export default function AppShell({ children }) {
         {children}
         <footer className="footer">
           <div className="container footer-inner">
-            <div>
-              <strong>CrLearn</strong> — Trains thinking, not memory.
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <img src="/brand-name.png" alt="CrLearn" style={{ height: 18, display: "block" }} />
+              <span>— Trains thinking, not memory.</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
               <Link href="/about" className="footer-link">About</Link>

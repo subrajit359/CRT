@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "wouter";
 import {
   FileText, Stethoscope, FolderOpen, Flag, BarChart3, Users,
   MessageSquare, User as UserIcon, ChevronRight, UserX, BookOpen, Mail, Home, Inbox, Bell,
+  Cpu, CheckCircle2, XCircle, Clock, RefreshCw, Trash2, CalendarClock,
 } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
 import Pagination from "../components/Pagination.jsx";
@@ -11,13 +13,49 @@ import EmptyState from "../components/EmptyState.jsx";
 import ErrorState from "../components/ErrorState.jsx";
 import useUrlPaging from "../lib/usePaging.js";
 import { relativeTime } from "../lib/date.js";
-import { api } from "../lib/api.js";
+import { api, apiUrl, getToken } from "../lib/api.js";
 import { useToast } from "../components/Toast.jsx";
 
-function StatValue({ value }) {
-  if (value === null || value === undefined) {
-    return <Skeleton width="60%" height={26} />;
+// ---------------------------------------------------------------------------
+// SSE parser (same pattern as CasePlay / DrRioWidget)
+// ---------------------------------------------------------------------------
+async function* parseSSE(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let eventType = "message";
+  let dataLines = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newlineIdx;
+    while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIdx).replace(/\r$/, "");
+      buffer = buffer.slice(newlineIdx + 1);
+      if (line === "") {
+        if (dataLines.length > 0) {
+          const dataStr = dataLines.join("\n");
+          try { yield { event: eventType, data: JSON.parse(dataStr) }; }
+          catch { yield { event: eventType, data: { raw: dataStr } }; }
+          eventType = "message";
+          dataLines = [];
+        }
+      } else if (line.startsWith("event:")) {
+        eventType = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+function StatValue({ value }) {
+  if (value === null || value === undefined) return <Skeleton width="60%" height={26} />;
   return <span>{value}</span>;
 }
 
@@ -49,6 +87,16 @@ function NavCard({ href, icon, title, body, badge }) {
   );
 }
 
+function JobStatusBadge({ status }) {
+  if (status === "running")  return <span className="badge badge-warning">Running</span>;
+  if (status === "done")     return <span className="badge badge-success">Done</span>;
+  if (status === "failed")   return <span className="badge badge-danger">Failed</span>;
+  return <span className="badge">Pending</span>;
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
 export default function AdminPanel() {
   const toast = useToast();
   const [stats, setStats] = useState(null);
@@ -58,17 +106,27 @@ export default function AdminPanel() {
   const [activityError, setActivityError] = useState(null);
   const studentAttemptsPg = useUrlPaging({ initialPage: 1, initialPageSize: 25, prefix: "ua", enabled: false });
 
-  const [genCount, setGenCount] = useState(5);
-  const [genLevel, setGenLevel] = useState(3);
+  // ── AI case generation state ─────────────────────────────────────────────
+  const [genCount, setGenCount]       = useState(5);
+  const [genLevel, setGenLevel]       = useState(3);
   const [genSpecialty, setGenSpecialty] = useState("");
   const [specialtyList, setSpecialtyList] = useState([]);
-  const [genBusy, setGenBusy] = useState(false);
+  const [showFallbackModal, setShowFallbackModal] = useState(false);
 
+  // Active job tracker
+  const [activeJob, setActiveJob] = useState(null); // { jobId, total, doneCount, failedCount, cases[], status }
+  const abortRef = useRef(null); // AbortController for the SSE fetch
+
+  // Recent jobs history
+  const [recentJobs, setRecentJobs] = useState(null);
+  const [jobsLoading, setJobsLoading] = useState(false);
+
+  // ── Other state ──────────────────────────────────────────────────────────
   const [unseenLogs, setUnseenLogs] = useState({ count: 0, hasError: false });
   const [supportUnread, setSupportUnread] = useState(0);
-
   const [appliedApps, setAppliedApps] = useState({ items: [], total: 0, loading: true, error: null });
 
+  // ── Loaders ──────────────────────────────────────────────────────────────
   function loadStats() {
     api.get("/api/admin/stats").then(setStats).catch(() => setStats({}));
   }
@@ -92,11 +150,44 @@ export default function AdminPanel() {
     api.get("/api/support/unread").then((r) => setSupportUnread(r.unread || 0)).catch(() => {});
   }
 
+  function loadRecentJobs() {
+    setJobsLoading(true);
+    api.get("/api/admin/jobs?limit=10")
+      .then((r) => { setRecentJobs(r.jobs || []); setJobsLoading(false); })
+      .catch(() => { setRecentJobs([]); setJobsLoading(false); });
+  }
+
+  async function deleteJob(jobId) {
+    try {
+      await api.del(`/api/admin/jobs/${jobId}`);
+      setRecentJobs((prev) => (prev || []).filter((j) => j.id !== jobId));
+      toast.success("Job deleted");
+    } catch (e) {
+      toast.error(e.message || "Failed to delete job");
+    }
+  }
+
+  async function cancelJobById(jobId) {
+    try {
+      await api.patch(`/api/admin/jobs/${jobId}/cancel`, {});
+      setRecentJobs((prev) =>
+        (prev || []).map((j) => j.id === jobId ? { ...j, status: "failed", error: "Cancelled by admin" } : j)
+      );
+      if (activeJob?.jobId === jobId) {
+        setActiveJob((j) => j ? { ...j, status: "failed" } : j);
+      }
+      toast.success("Job cancelled");
+    } catch (e) {
+      toast.error(e.message || "Failed to cancel job");
+    }
+  }
+
   useEffect(() => {
     loadStats();
     loadActivity();
     loadAppliedApps();
     loadSupportUnread();
+    loadRecentJobs();
     api.get("/api/cases/specialties")
       .then((r) => setSpecialtyList(r.specialties || []))
       .catch((e) => console.warn("Specialty list fetch failed:", e?.message || e));
@@ -113,26 +204,118 @@ export default function AdminPanel() {
     return () => window.removeEventListener("admin:logs:status", onStatus);
   }, []);
 
+  // ── Case generation with live SSE progress ────────────────────────────────
   async function generateCases() {
-    setGenBusy(true);
-    try {
-      const r = await api.post("/api/admin/cases/generate", { count: genCount, level: genLevel, specialty: genSpecialty || null });
-      const okN = r.inserted?.length || 0;
-      if (okN === 0) toast.error("AI generation failed — check server logs");
-      else if (r.failedCount) toast.success(`Generated ${okN} of ${genCount} cases (${r.failedCount} failed)`);
-      else toast.success(`Generated ${okN} cases with diagnoses`);
-      loadStats();
-    } catch (e) { toast.error(e.message); }
-    finally { setGenBusy(false); }
+    if (activeJob?.status === "running") return;
+    // Groq is now primary — skip the model-selection modal and go straight to generation
+    startGeneration(false);
   }
 
-  const pendingDoctorBadge = useMemo(() => stats?.pendingDoctors ?? null, [stats]);
-  const openDeleteBadge = useMemo(() => stats?.openDeleteRequests ?? null, [stats]);
-  const openReportsBadge = useMemo(() => stats?.openReports ?? null, [stats]);
+  async function startGeneration(allowFallback) {
+    setShowFallbackModal(false);
+    if (activeJob?.status === "running") return;
 
+    // Abort any existing SSE fetch
+    if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
+
+    let jobId;
+    try {
+      const r = await api.post("/api/admin/cases/generate", {
+        count: genCount, level: genLevel, specialty: genSpecialty || null, allowFallback,
+      });
+      jobId = r.jobId;
+    } catch (e) {
+      toast.error(e.message);
+      return;
+    }
+
+    // Initialise local job state
+    setActiveJob({ jobId, total: genCount, doneCount: 0, failedCount: 0, cases: [], status: "running" });
+
+    // Open SSE stream
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    try {
+      const token = getToken();
+      const response = await fetch(apiUrl(`/api/admin/jobs/${jobId}/stream`), {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          "Accept": "text/event-stream",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+        },
+        signal: ctrl.signal,
+      });
+
+      if (!response.ok) throw new Error(`Job stream error (${response.status})`);
+
+      for await (const { event, data } of parseSSE(response)) {
+        if (event === "status") {
+          // Initial snapshot from the server
+          setActiveJob((j) => j ? {
+            ...j,
+            total: data.total ?? j.total,
+            doneCount: data.done_count ?? j.doneCount,
+            failedCount: data.failed_count ?? j.failedCount,
+            status: data.status ?? j.status,
+          } : j);
+        } else if (event === "case_done") {
+          setActiveJob((j) => j ? {
+            ...j,
+            doneCount: data.doneCount ?? j.doneCount,
+            failedCount: data.failedCount ?? j.failedCount,
+            cases: data.case ? [...j.cases, data.case] : j.cases,
+          } : j);
+        } else if (event === "case_failed") {
+          setActiveJob((j) => j ? {
+            ...j,
+            doneCount: data.doneCount ?? j.doneCount,
+            failedCount: data.failedCount ?? j.failedCount,
+          } : j);
+        } else if (event === "done") {
+          setActiveJob((j) => j ? { ...j, status: "done" } : j);
+          const ok = data.inserted?.length || 0;
+          const fail = data.failedCount || 0;
+          if (ok === 0) toast.error("AI generation failed — check server logs");
+          else if (fail) toast.success(`Generated ${ok} of ${genCount} case${genCount !== 1 ? "s" : ""} (${fail} failed)`);
+          else toast.success(`Generated ${ok} case${ok !== 1 ? "s" : ""} successfully`);
+          loadStats();
+          loadRecentJobs();
+          break;
+        } else if (event === "error") {
+          setActiveJob((j) => j ? { ...j, status: "failed" } : j);
+          toast.error(data.error || "Job failed");
+          loadRecentJobs();
+          break;
+        }
+      }
+    } catch (e) {
+      if (e.name !== "AbortError") {
+        setActiveJob((j) => j ? { ...j, status: "failed" } : j);
+        toast.error(e.message);
+      }
+    } finally {
+      abortRef.current = null;
+    }
+  }
+
+  function dismissJob() {
+    if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
+    setActiveJob(null);
+  }
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const genBusy = activeJob?.status === "running";
+  const pendingDoctorBadge = useMemo(() => stats?.pendingDoctors ?? null, [stats]);
+  const openDeleteBadge    = useMemo(() => stats?.openDeleteRequests ?? null, [stats]);
+  const openReportsBadge   = useMemo(() => stats?.openReports ?? null, [stats]);
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <AppShell>
       <div className="container fade-in">
+
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div>
@@ -228,6 +411,8 @@ export default function AdminPanel() {
           <NavCard href="/admin/mail" icon={<Mail size={20} strokeWidth={1.75} aria-hidden="true" />} title="Mail sender" body="Send an email directly to any registered user" />
           <NavCard href="/admin/contact-messages" icon={<Inbox size={20} strokeWidth={1.75} aria-hidden="true" />} title="Contact messages" body="View and manage contact form submissions" />
           <NavCard href="/admin/push" icon={<Bell size={20} strokeWidth={1.75} aria-hidden="true" />} title="Push notifications" body="Broadcast announcements to subscribed devices" />
+          <NavCard href="/admin/digest" icon={<CalendarClock size={20} strokeWidth={1.75} aria-hidden="true" />} title="Weekly digest" body="Manage automated Monday email + push digest for students" />
+          <NavCard href="/admin/ai-room" icon={<Cpu size={20} strokeWidth={1.75} aria-hidden="true" />} title="AI Room" body="Monitor, test, and toggle every AI used in the platform" />
         </div>
 
         {/* Practice activity — all users */}
@@ -315,14 +500,31 @@ export default function AdminPanel() {
           })()}
         </div>
 
-        {/* AI generate */}
+        {/* ── AI Generate cases ─────────────────────────────────────────── */}
         <div className="spacer-7" />
         <div className="card">
-          <h3>Generate cases with AI</h3>
-          <p className="muted small" style={{ marginTop: 4 }}>
-            Generates clinical cases with diagnoses and accepted-answer aliases. Cases are tagged as AI-generated.
-          </p>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+            <div>
+              <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                <Cpu size={18} strokeWidth={1.75} aria-hidden="true" />
+                Generate cases with AI
+              </h3>
+              <p className="muted small" style={{ marginTop: 4 }}>
+                Cases are generated in the background — you see each one appear as it's ready.
+              </p>
+            </div>
+            {recentJobs !== null && (
+              <button className="btn btn-ghost btn-sm" onClick={loadRecentJobs} disabled={jobsLoading}
+                style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <RefreshCw size={14} style={jobsLoading ? { animation: "spin 1s linear infinite" } : {}} />
+                Refresh history
+              </button>
+            )}
+          </div>
+
           <div className="spacer-7" />
+
+          {/* Controls */}
           <div className="row" style={{ gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div className="field" style={{ minWidth: 140 }}>
               <label className="label">How many?</label>
@@ -352,12 +554,213 @@ export default function AdminPanel() {
                 {specialtyList.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-            <button className="btn btn-primary" onClick={generateCases} disabled={genBusy} style={{ height: 40 }}>
-              {genBusy ? <><span className="spinner" /> Generating… (may take 30–90s)</> : `Generate ${genCount} case${genCount === 1 ? "" : "s"}`}
+            <button className="btn btn-primary" onClick={generateCases} disabled={genBusy} style={{ height: 40, display: "flex", alignItems: "center", gap: 8 }}>
+              {genBusy
+                ? <><span className="spinner" /> Generating…</>
+                : `Generate ${genCount} case${genCount === 1 ? "" : "s"}`}
+            </button>
+          </div>
+
+          {/* Live job progress */}
+          {activeJob && (
+            <div style={{ marginTop: 20 }}>
+              {/* Progress bar */}
+              {(() => {
+                const pct = activeJob.total > 0
+                  ? Math.round(((activeJob.doneCount + activeJob.failedCount) / activeJob.total) * 100)
+                  : 0;
+                const isRunning = activeJob.status === "running";
+                const isDone    = activeJob.status === "done";
+                const isFailed  = activeJob.status === "failed";
+                return (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ fontWeight: 600, fontSize: 14 }}>
+                        {isRunning && `Generating… ${activeJob.doneCount + activeJob.failedCount} / ${activeJob.total}`}
+                        {isDone    && `Done — ${activeJob.doneCount} generated${activeJob.failedCount ? `, ${activeJob.failedCount} failed` : ""}`}
+                        {isFailed  && "Job failed — see server logs"}
+                      </span>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <span className="muted small">{pct}%</span>
+                        {!isRunning && (
+                          <button className="btn btn-ghost btn-sm" onClick={dismissJob}>Dismiss</button>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{
+                      height: 8, borderRadius: 4,
+                      background: "var(--bg-soft, #e2e8f0)",
+                      overflow: "hidden",
+                    }}>
+                      <div style={{
+                        height: "100%",
+                        width: `${pct}%`,
+                        borderRadius: 4,
+                        background: isFailed ? "#dc2626" : isDone ? "#16a34a" : "var(--color-primary, #2563eb)",
+                        transition: "width 0.4s ease",
+                      }} />
+                    </div>
+
+                    {/* Case list as they come in */}
+                    {activeJob.cases.length > 0 && (
+                      <ul className="list-reset" style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+                        {activeJob.cases.map((c) => (
+                          <li key={c.id} style={{
+                            display: "flex", alignItems: "center", gap: 10,
+                            padding: "8px 12px", borderRadius: 8,
+                            background: "var(--bg-soft, #f8fafc)",
+                            fontSize: 13,
+                          }}>
+                            <CheckCircle2 size={15} color="#16a34a" style={{ flexShrink: 0 }} />
+                            <span style={{ flex: 1, minWidth: 0 }}>
+                              <Link href={`/case/${c.id}`} style={{ fontWeight: 600 }}>{c.title}</Link>
+                              <span className="muted" style={{ marginLeft: 8 }}>{c.specialty}</span>
+                            </span>
+                          </li>
+                        ))}
+                        {activeJob.failedCount > 0 && (
+                          <li style={{
+                            display: "flex", alignItems: "center", gap: 10,
+                            padding: "8px 12px", borderRadius: 8,
+                            background: "#fef2f2", fontSize: 13,
+                          }}>
+                            <XCircle size={15} color="#dc2626" style={{ flexShrink: 0 }} />
+                            <span className="muted">{activeJob.failedCount} case{activeJob.failedCount > 1 ? "s" : ""} failed to generate</span>
+                          </li>
+                        )}
+                      </ul>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Recent job history */}
+          <div style={{ marginTop: activeJob ? 20 : 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <h4 style={{ margin: 0, fontSize: 14 }}>Recent generation jobs</h4>
+            </div>
+            {jobsLoading && recentJobs === null ? (
+              <SkeletonRows n={3} avatar={false} />
+            ) : !recentJobs || recentJobs.length === 0 ? (
+              <p className="muted small">No jobs yet. Generate some cases to see history here.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {recentJobs.map((j) => {
+                  const payload = j.payload || {};
+                  const label = [
+                    payload.count ? `${payload.count} case${payload.count > 1 ? "s" : ""}` : null,
+                    payload.specialty || "mixed",
+                    payload.level ? `L${payload.level}` : null,
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <div key={j.id} style={{
+                      display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+                      padding: "8px 12px", borderRadius: 8,
+                      background: "var(--bg-soft, #f8fafc)", fontSize: 13,
+                    }}>
+                      <div style={{ flexShrink: 0 }}>
+                        {j.status === "done"    && <CheckCircle2 size={15} color="#16a34a" />}
+                        {j.status === "running" && <Clock size={15} color="#d97706" style={{ animation: "spin 2s linear infinite" }} />}
+                        {j.status === "failed"  && <XCircle size={15} color="#dc2626" />}
+                        {j.status === "pending" && <Clock size={15} className="muted" />}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 120 }}>
+                        <span style={{ fontWeight: 600 }}>{label}</span>
+                        {j.creator_name && <span className="muted" style={{ marginLeft: 8 }}>by {j.creator_name}</span>}
+                      </div>
+                      <div className="muted" style={{ flexShrink: 0 }}>
+                        {j.done_count}/{j.total} done
+                        {j.failed_count > 0 && <span style={{ color: "#dc2626", marginLeft: 6 }}>{j.failed_count} failed</span>}
+                      </div>
+                      <JobStatusBadge status={j.status} />
+                      <span className="muted small" style={{ flexShrink: 0 }}>{relativeTime(j.created_at)}</span>
+                      {j.status === "running" && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          title="Cancel job"
+                          onClick={() => cancelJobById(j.id)}
+                          style={{ padding: "2px 6px", color: "var(--danger, #dc2626)", flexShrink: 0, fontSize: 12 }}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      {j.status !== "running" && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          title="Delete job"
+                          onClick={() => deleteJob(j.id)}
+                          style={{ padding: "2px 6px", color: "var(--danger, #dc2626)", flexShrink: 0 }}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+      </div>
+
+      {/* ── Groq fallback confirmation modal — portalled to body so fixed positioning is never clipped ── */}
+      {showFallbackModal && createPortal(
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 1000,
+          background: "rgba(0,0,0,0.45)", display: "flex",
+          alignItems: "center", justifyContent: "center", padding: 16,
+        }}
+          onClick={() => setShowFallbackModal(false)}
+        >
+          <div className="card" style={{
+            maxWidth: 420, width: "100%", padding: 28,
+            boxShadow: "0 8px 40px rgba(0,0,0,0.22)", borderRadius: 12,
+          }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 8px" }}>Choose AI model</h3>
+            <p className="muted small" style={{ margin: "0 0 20px", lineHeight: 1.6 }}>
+              Cases are generated with <strong>Gemini</strong> by default.
+              If Gemini hits its free-tier limit mid-job, should the system
+              automatically switch to <strong>Groq</strong> to keep generating?
+            </p>
+            <div style={{ background: "var(--surface-2, #f5f5f5)", borderRadius: 8, padding: "10px 14px", marginBottom: 20, fontSize: 13 }}>
+              <div style={{ marginBottom: 6 }}>
+                <strong>Gemini</strong> — higher clinical quality, 1,500 req/day free limit
+              </div>
+              <div>
+                <strong>Groq</strong> — fast fallback, generous rate limits, slightly less detailed
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={() => startGeneration(true)}
+              >
+                Yes, switch to Groq if needed
+              </button>
+              <button
+                className="btn btn-secondary"
+                style={{ flex: 1 }}
+                onClick={() => startGeneration(false)}
+              >
+                No, Gemini only
+              </button>
+            </div>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ marginTop: 12, width: "100%" }}
+              onClick={() => setShowFallbackModal(false)}
+            >
+              Cancel
             </button>
           </div>
         </div>
-      </div>
+      , document.body)}
     </AppShell>
   );
 }

@@ -40,6 +40,7 @@ const SearchPage          = lazy(() => import("./pages/SearchPage.jsx"));
 const Settings            = lazy(() => import("./pages/Settings.jsx"));
 const Notifications       = lazy(() => import("./pages/Notifications.jsx"));
 const Progress            = lazy(() => import("./pages/Progress.jsx"));
+const Insights            = lazy(() => import("./pages/Insights.jsx"));
 const DoctorLounge        = lazy(() => import("./pages/DoctorLounge.jsx"));
 const Messages            = lazy(() => import("./pages/Messages.jsx"));
 const Leaderboard         = lazy(() => import("./pages/Leaderboard.jsx"));
@@ -59,6 +60,8 @@ const AdminDxFrameworks   = lazy(() => import("./pages/AdminDxFrameworks.jsx"));
 const PublicBlog          = lazy(() => import("./pages/PublicBlog.jsx"));
 const AdminContactMessages  = lazy(() => import("./pages/AdminContactMessages.jsx"));
 const AdminPushNotifications = lazy(() => import("./pages/AdminPushNotifications.jsx"));
+const AdminDigest            = lazy(() => import("./pages/AdminDigest.jsx"));
+const AdminAIRoom            = lazy(() => import("./pages/AdminAIRoom.jsx"));
 const About               = lazy(() => import("./pages/About.jsx"));
 const Contact             = lazy(() => import("./pages/Contact.jsx"));
 const Privacy             = lazy(() => import("./pages/Privacy.jsx"));
@@ -138,6 +141,7 @@ function Routes() {
           <Route path="/notifications"><ProtectedRoute><Notifications /></ProtectedRoute></Route>
           <Route path="/leaderboard"><ProtectedRoute><Leaderboard /></ProtectedRoute></Route>
           <Route path="/progress"><ProtectedRoute roles={["student"]}><Progress /></ProtectedRoute></Route>
+          <Route path="/insights"><ProtectedRoute roles={["student"]}><Insights /></ProtectedRoute></Route>
           <Route path="/level-practice"><ProtectedRoute roles={["student"]}><LevelPractice /></ProtectedRoute></Route>
           <Route path="/admin"><ProtectedRoute roles={["admin"]}><AdminPanel /></ProtectedRoute></Route>
           <Route path="/admin/logs"><ProtectedRoute roles={["admin"]}><AdminLogs /></ProtectedRoute></Route>
@@ -174,6 +178,8 @@ function Routes() {
 
           <Route path="/admin/contact-messages"><ProtectedRoute roles={["admin"]}><AdminContactMessages /></ProtectedRoute></Route>
           <Route path="/admin/push"><ProtectedRoute roles={["admin"]}><AdminPushNotifications /></ProtectedRoute></Route>
+          <Route path="/admin/digest"><ProtectedRoute roles={["admin"]}><AdminDigest /></ProtectedRoute></Route>
+          <Route path="/admin/ai-room"><ProtectedRoute roles={["admin"]}><AdminAIRoom /></ProtectedRoute></Route>
           <Route path="/blog" component={PublicBlog} />
           <Route path="/about" component={About} />
           <Route path="/contact" component={Contact} />

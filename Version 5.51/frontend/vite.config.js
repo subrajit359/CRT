@@ -22,15 +22,17 @@ export default defineConfig({
     cssCodeSplit: true,
     reportCompressedSize: false,
     modulePreload: { polyfill: false },
+    assetsInlineLimit: 4096,
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (id.includes("node_modules/react-dom")) return "vendor-react-dom";
-          if (id.includes("node_modules/react")) return "vendor-react";
+          if (id.includes("node_modules/react/")) return "vendor-react";
           if (id.includes("node_modules/framer-motion")) return "vendor-motion";
           if (id.includes("node_modules/lucide-react")) return "vendor-icons";
           if (id.includes("node_modules/react-window")) return "vendor-window";
           if (id.includes("node_modules/wouter")) return "vendor-router";
+          if (id.includes("node_modules/")) return "vendor-misc";
         },
       },
     },
@@ -45,7 +47,6 @@ export default defineConfig({
       "react-dom",
       "react-dom/client",
       "wouter",
-      "framer-motion",
       "lucide-react",
       "react-window",
     ],
@@ -57,7 +58,7 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       "/api": {
-        target: "http://localhost:5000",
+        target: "http://localhost:3001",
         changeOrigin: true,
         configure: (proxy) => {
           proxy.on("proxyReq", (proxyReq) => {

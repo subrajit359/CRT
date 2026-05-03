@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
+import { LayoutDashboard, Pencil } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
 import { useAuth } from "../lib/auth.jsx";
 import "../styles/ResourceAdmin.css";
@@ -227,11 +228,11 @@ export default function NeetResourceAdmin() {
 
           <aside className={"ra-sidebar" + (sidebarOpen ? " ra-sidebar-open" : "")}>
             <nav className="ra-nav">
-              <button className={"ra-nav-btn" + (view === "dashboard" ? " active" : "")} onClick={() => handleNav("dashboard")}>
-                📋 Dashboard
+              <button className={"ra-nav-btn" + (view === "dashboard" ? " active" : "")} onClick={() => handleNav("dashboard")} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                <LayoutDashboard size={14} /> Dashboard
               </button>
-              <button className={"ra-nav-btn" + (view === "editPost" && !editingPost ? " active" : "")} onClick={startNewPost}>
-                ✏️ New Post
+              <button className={"ra-nav-btn" + (view === "editPost" && !editingPost ? " active" : "")} onClick={startNewPost} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                <Pencil size={14} /> New Post
               </button>
               <div className="ra-nav-divider" />
               <Link href="/study" className="ra-nav-btn secondary">↗ View Blog</Link>

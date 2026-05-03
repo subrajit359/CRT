@@ -2,9 +2,15 @@ import express from "express";
 import { query } from "../db.js";
 import { requireAuth } from "../auth-middleware.js";
 import { notify } from "../notify.js";
-import { caseOpenai as openai, loadPrompt } from "../openai.js";
+import { caseOpenai, groqFallbackOpenai, loadPrompt } from "../openai.js";
 import { isMailerConfigured, sendMail } from "../mailer.js";
 import { sendPushBroadcast } from "../push.js";
+import {
+  createJob, startJob, recordCaseDone, recordCaseFailed,
+  finishJob, failJob, subscribeJob, getJob, listJobs,
+  isJobCancelled, cancelJob,
+} from "../jobRunner.js";
+import { runDigest, getDigestSettings, setDigestSettings } from "../digestScheduler.js";
 
 const router = express.Router();
 
@@ -15,6 +21,32 @@ const SPECIALTIES = [
 ];
 
 const LEVEL_LABEL = { 1: "first-year", 2: "second-year", 3: "third-year", 4: "fourth-year", 5: "intern", 6: "resident", 7: "advanced resident" };
+
+// Retry helper with exponential backoff — handles Gemini/OpenAI 429 rate limits.
+// Reads the Retry-After header when present; otherwise doubles the delay each attempt.
+async function withRetry(fn, { maxAttempts = 4, baseDelayMs = 8000 } = {}) {
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const is429 = e?.status === 429 || e?.response?.status === 429 ||
+        (e?.message || "").includes("429");
+      if (!is429 || attempt === maxAttempts) throw e;
+      // Honour Retry-After if the SDK surfaces it.
+      // Otherwise wait at least 60 s so the per-minute window fully resets
+      // before retrying (Gemini free tier: 15 RPM).
+      const retryAfterSec = e?.headers?.["retry-after"] || e?.response?.headers?.["retry-after"];
+      const waitMs = retryAfterSec
+        ? Math.ceil(parseFloat(retryAfterSec) * 1000)
+        : Math.max(60000, baseDelayMs * Math.pow(2, attempt - 1));
+      console.warn(`[admin/cases/generate] 429 rate-limit — waiting ${Math.round(waitMs / 1000)}s before retry ${attempt}/${maxAttempts - 1}`);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+  throw lastErr;
+}
 
 function tryParseJson(text) {
   if (!text) return null;
@@ -42,7 +74,7 @@ function scrubLeak(text, diagnosis, aliases = []) {
 
 // Ask the model to silently audit its own draft for clinical contradictions and
 // fix them. Cheap, single round-trip, large accuracy uplift in practice.
-async function reviseCaseForAccuracy(draft, { specialty, level, model }) {
+async function reviseCaseForAccuracy(draft, { specialty, level, model, client }) {
   const review = `You are a board-certified ${specialty} physician auditing a teaching case for clinical errors before it reaches students.
 
 Audit this case for:
@@ -61,7 +93,7 @@ Return STRICT JSON with the exact same schema as the input. No prose, no fences.
 INPUT CASE:
 ${JSON.stringify(draft, null, 2)}`;
   try {
-    const resp = await openai.chat.completions.create({
+    const resp = await withRetry(() => client.chat.completions.create({
       model,
       temperature: 0.2,
       max_tokens: 4000,
@@ -70,7 +102,7 @@ ${JSON.stringify(draft, null, 2)}`;
         { role: "system", content: "You output ONLY valid JSON. No prose, no markdown fences." },
         { role: "user", content: review },
       ],
-    });
+    }));
     const text = resp.choices[0]?.message?.content || "";
     const parsed = tryParseJson(text);
     if (parsed && parsed.title && parsed.body && parsed.diagnosis) return parsed;
@@ -80,17 +112,36 @@ ${JSON.stringify(draft, null, 2)}`;
   return draft;
 }
 
-async function generateOneCase({ specialty, level }) {
+// Try fn() with the primary client; if it keeps 429-ing, fall back to Groq — but only
+// when the admin has explicitly allowed it (allowFallback=true).
+async function callWithFallback(primaryClient, primaryModel, fallbackClient, fallbackModel, buildMessages, extraParams = {}, allowFallback = false) {
+  try {
+    return await withRetry(() => primaryClient.chat.completions.create({
+      model: primaryModel, ...extraParams, messages: buildMessages(),
+    }));
+  } catch (e) {
+    const is429 = e?.status === 429 || (e?.message || "").includes("429");
+    if (!is429 || !allowFallback) throw e;
+    console.warn(`[admin/cases/generate] Gemini quota exhausted — switching to Groq (${fallbackModel}) as authorised by admin`);
+    return await withRetry(() => fallbackClient.chat.completions.create({
+      model: fallbackModel, ...extraParams, messages: buildMessages(),
+    }), { maxAttempts: 3, baseDelayMs: 4000 });
+  }
+}
+
+async function generateOneCase({ specialty, level, allowFallback = false }) {
   const prompt = loadPrompt("casePrompt.txt")
     .replaceAll("{LEVEL}", LEVEL_LABEL[level] || "third-year")
     .replaceAll("{SPECIALTY}", specialty);
 
-  // Allow a stronger model to be configured just for case authoring.
-  const model = process.env.AI_CASE_MODEL || process.env.AI_MODEL || "gpt-4o-mini";
+  const geminiModel = process.env.AI_CASE_MODEL || "gemini-2.0-flash";
+  const groqModel   = process.env.AI_MODEL || "llama-3.3-70b-versatile";
 
-  const resp = await openai.chat.completions.create({
-    model,
-    temperature: 0.4, // factual + creative balance
+  // Primary: Groq (Gemini free-tier quota unavailable on this account).
+  // Switch primary back to caseOpenai/geminiModel once a working Gemini key is available.
+  const resp = await withRetry(() => groqFallbackOpenai.chat.completions.create({
+    model: groqModel,
+    temperature: 0.4,
     top_p: 0.9,
     max_tokens: 6000,
     response_format: { type: "json_object" },
@@ -98,7 +149,8 @@ async function generateOneCase({ specialty, level }) {
       { role: "system", content: "You are a board-certified physician and medical educator. You output ONLY valid JSON matching the user's schema. No prose, no markdown fences. Clinical accuracy is non-negotiable." },
       { role: "user", content: prompt },
     ],
-  });
+  }));
+
   const text = resp.choices[0]?.message?.content || "";
   let parsed = tryParseJson(text);
   if (!parsed || !parsed.title || !parsed.body || !parsed.diagnosis) {
@@ -106,8 +158,9 @@ async function generateOneCase({ specialty, level }) {
   }
 
   // Self-audit pass — opt-out via AI_CASE_REVISE=0
+  // Uses Groq for revision so Gemini quota is saved for the main generation call.
   if (process.env.AI_CASE_REVISE !== "0") {
-    parsed = await reviseCaseForAccuracy(parsed, { specialty, level, model });
+    parsed = await reviseCaseForAccuracy(parsed, { specialty, level, model: groqModel, client: groqFallbackOpenai });
   }
 
   const diagnosis = String(parsed.diagnosis);
@@ -132,31 +185,112 @@ async function generateOneCase({ specialty, level }) {
   };
 }
 
-router.post("/cases/generate", requireAuth(["admin"]), async (req, res) => {
-  const count = Math.max(1, Math.min(10, parseInt(req.body.count, 10) || 5));
-  const specialty = req.body.specialty && SPECIALTIES.includes(req.body.specialty) ? req.body.specialty : null;
-  const level = parseInt(req.body.level, 10) || 3;
+// Background worker that runs AFTER the HTTP response has been sent.
+async function runCaseGenerationJob(jobId, { count, specialty, level, userId, allowFallback }) {
+  try {
+    await startJob(jobId);
+    const inserted = [];
+    let failedCount = 0;
 
-  const inserted = [];
-  const failed = [];
-  for (let i = 0; i < count; i++) {
-    const spec = specialty || SPECIALTIES[Math.floor(Math.random() * SPECIALTIES.length)];
-    try {
-      const c = await generateOneCase({ specialty: spec, level });
-      const { rows } = await query(
-        `INSERT INTO cases (title, specialty, level, body, questions, source, source_kind, uploader_id,
-                            diagnosis, accepted_diagnoses, diagnosis_explanation)
-         VALUES ($1,$2,$3,$4,$5::jsonb,$6,'ai',$7,$8,$9::jsonb,$10) RETURNING id`,
-        [c.title, c.specialty, c.level, c.body, JSON.stringify(c.questions),
-         "AI generated", req.user.id, c.diagnosis, JSON.stringify(c.acceptedDiagnoses), c.diagnosisExplanation]
-      );
-      inserted.push({ id: rows[0].id, title: c.title, specialty: c.specialty });
-    } catch (e) {
-      console.error("[admin/cases/generate] failed", e.message);
-      failed.push(e.message);
+    for (let i = 0; i < count; i++) {
+      // Check if this job was cancelled between iterations
+      if (isJobCancelled(jobId)) {
+        console.log(`[admin/cases/generate] job ${jobId} cancelled — stopping after ${i} case(s)`);
+        return;
+      }
+      // Small gap between cases to avoid back-to-back 429s on Gemini free tier
+      if (i > 0) await new Promise((r) => setTimeout(r, 8000)); // 8 s gap → ~7 RPM, well under Gemini free-tier 15 RPM
+      if (isJobCancelled(jobId)) return; // check again after the delay
+      const spec = specialty || SPECIALTIES[Math.floor(Math.random() * SPECIALTIES.length)];
+      try {
+        const c = await generateOneCase({ specialty: spec, level, allowFallback });
+        const { rows } = await query(
+          `INSERT INTO cases (title, specialty, level, body, questions, source, source_kind, uploader_id,
+                              diagnosis, accepted_diagnoses, diagnosis_explanation)
+           VALUES ($1,$2,$3,$4,$5::jsonb,$6,'ai',$7,$8,$9::jsonb,$10) RETURNING id`,
+          [c.title, c.specialty, c.level, c.body, JSON.stringify(c.questions),
+           "AI generated", userId, c.diagnosis, JSON.stringify(c.acceptedDiagnoses), c.diagnosisExplanation]
+        );
+        const info = { id: rows[0].id, title: c.title, specialty: c.specialty };
+        inserted.push(info);
+        await recordCaseDone(jobId, info);
+      } catch (e) {
+        console.error("[admin/cases/generate] case failed", e.message);
+        failedCount++;
+        await recordCaseFailed(jobId, e.message);
+      }
     }
+
+    await finishJob(jobId, { inserted, failedCount });
+  } catch (e) {
+    console.error("[admin/cases/generate] job crashed", e.message);
+    await failJob(jobId, e.message);
   }
-  res.json({ ok: true, inserted, failedCount: failed.length });
+}
+
+router.post("/cases/generate", requireAuth(["admin"]), async (req, res) => {
+  const count         = Math.max(1, Math.min(10, parseInt(req.body.count, 10) || 5));
+  const specialty     = req.body.specialty && SPECIALTIES.includes(req.body.specialty) ? req.body.specialty : null;
+  const level         = parseInt(req.body.level, 10) || 3;
+  const allowFallback = req.body.allowFallback === true;
+
+  const jobId = await createJob({
+    kind: "case_generate",
+    payload: { count, specialty, level },
+    userId: req.user.id,
+  });
+
+  // Fire-and-forget — response goes back immediately
+  runCaseGenerationJob(jobId, { count, specialty, level, userId: req.user.id, allowFallback });
+
+  res.json({ ok: true, jobId });
+});
+
+// ---------------------------------------------------------------------------
+// Job status & SSE stream endpoints
+// ---------------------------------------------------------------------------
+
+router.get("/jobs", requireAuth(["admin"]), async (req, res) => {
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const jobs = await listJobs({ limit });
+  res.json({ jobs });
+});
+
+router.get("/jobs/:id", requireAuth(["admin"]), async (req, res) => {
+  const job = await getJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+  res.json({ job });
+});
+
+router.get("/jobs/:id/stream", requireAuth(["admin"]), (req, res) => {
+  const { id } = req.params;
+  subscribeJob(id, res);
+  // Keep-alive ping every 20s so proxies don't close the connection
+  const ping = setInterval(() => {
+    if (!res.writableEnded) res.write(": ping\n\n");
+  }, 20_000);
+  res.on("close", () => clearInterval(ping));
+});
+
+router.delete("/jobs/:id", requireAuth(["admin"]), async (req, res) => {
+  const { id } = req.params;
+  const { rowCount } = await query(
+    `DELETE FROM ai_jobs WHERE id=$1 AND status != 'running'`,
+    [id]
+  );
+  if (rowCount === 0) {
+    return res.status(404).json({ error: "Job not found or still running — cannot delete a running job." });
+  }
+  res.json({ ok: true });
+});
+
+router.patch("/jobs/:id/cancel", requireAuth(["admin"]), async (req, res) => {
+  const { id } = req.params;
+  const job = await getJob(id);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+  if (job.status !== "running") return res.status(400).json({ error: "Job is not running" });
+  await cancelJob(id);
+  res.json({ ok: true });
 });
 
 // Shared helper: clamp ?page / ?pageSize and return SQL LIMIT/OFFSET.
@@ -623,6 +757,60 @@ router.delete("/contact-messages/:id", requireAuth(["admin"]), async (req, res) 
   }
 });
 
+// ── Digest routes ─────────────────────────────────────────────────────────────
+router.get("/digest/status", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const settings = await getDigestSettings();
+    const { rows: lastRuns } = await query(
+      `SELECT * FROM digest_runs ORDER BY started_at DESC LIMIT 1`
+    );
+    const { rows: countRows } = await query(
+      `SELECT COUNT(*)::int AS n FROM users u
+        WHERE u.role = 'student'
+          AND (SELECT COUNT(*) FROM responses r WHERE r.user_id = u.id) >= 3`
+    );
+    res.json({
+      ...settings,
+      lastRun:        lastRuns[0] || null,
+      eligibleStudents: countRows[0]?.n || 0,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.patch("/digest/settings", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const { enabled, hourUtc, dayUtc } = req.body || {};
+    await setDigestSettings({ enabled, hourUtc, dayUtc });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/digest/send-now", requireAuth(["admin"]), async (req, res) => {
+  try {
+    // Start in background, respond immediately so the UI stays responsive
+    res.json({ ok: true, message: "Digest run started in background" });
+    runDigest({ triggeredBy: `admin:${req.user.id}` })
+      .catch((e) => console.error("[digest] manual run error:", e.message));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/digest/runs", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT * FROM digest_runs ORDER BY started_at DESC LIMIT 20`
+    );
+    res.json({ runs: rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Push notification subscriber count
 router.get("/push/stats", requireAuth(["admin"]), async (req, res) => {
   try {
@@ -652,6 +840,138 @@ router.post("/push/broadcast", requireAuth(["admin"]), async (req, res) => {
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Notification scheduler test & status routes ───────────────────────────────
+import {
+  runMorningNotification,
+  runNightNotification,
+  runFestivalCheck,
+  runFestivalForced,
+  runNudgeNotification,
+  getScheduleInfo,
+  ensureWeekSchedule,
+  generateWeekSchedule,
+  getSchedulerEnabled,
+  setSchedulerEnabled,
+} from "../notificationScheduler.js";
+import { query as cfgQuery } from "../db.js";
+
+router.get("/push/scheduler-status", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const enabled = await getSchedulerEnabled();
+    res.json({ enabled });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/push/scheduler-toggle", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const { enabled } = req.body || {};
+    if (typeof enabled !== "boolean") return res.status(400).json({ error: "enabled (boolean) required" });
+    const result = await setSchedulerEnabled(enabled);
+    res.json({ enabled: result });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/push/nudge-schedule", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const info = await getScheduleInfo();
+    res.json(info);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/push/regenerate-schedule", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const slots = generateWeekSchedule();
+    const ist = new Date(Date.now() + 330 * 60 * 1000);
+    const tmp = new Date(ist);
+    tmp.setUTCHours(0, 0, 0, 0);
+    tmp.setUTCDate(tmp.getUTCDate() + 4 - (tmp.getUTCDay() || 7));
+    const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+    const week = `${tmp.getUTCFullYear()}-W${String(Math.ceil(((tmp - yearStart) / 86400000 + 1) / 7)).padStart(2, "0")}`;
+    await cfgQuery(
+      `INSERT INTO app_config (key,value) VALUES ('nudge_schedule',$1)
+       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`,
+      [JSON.stringify({ week, slots })]
+    );
+    res.json({ ok: true, week, slots });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/push/test-morning", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const result = await runMorningNotification({ force: true });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/push/test-night", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const result = await runNightNotification({ force: true });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/push/test-festival", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const { festival } = req.body || {};
+    const result = festival?.trim()
+      ? await runFestivalForced(festival.trim())
+      : await runFestivalCheck({ force: true });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/push/test-nudge", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const result = await runNudgeNotification({ force: true });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/push/test-task-ai", requireAuth(["admin"]), async (req, res) => {
+  try {
+    const OpenAI = (await import("openai")).default;
+    const client = new OpenAI({
+      baseURL: process.env.TASK_AI_BASE_URL || "https://api.groq.com/openai/v1",
+      apiKey:  process.env.TASK_AI_API_KEY  || process.env.GROQ_API_KEY || "missing",
+    });
+    const model = process.env.TASK_AI_MODEL || "llama-3.1-8b-instant";
+    const started = Date.now();
+    const completion = await client.chat.completions.create({
+      model,
+      messages: [{ role: "user", content: "Say exactly: Task AI is connected and working." }],
+      max_tokens: 30,
+      temperature: 0,
+    });
+    const latencyMs = Date.now() - started;
+    const reply = completion.choices[0]?.message?.content?.trim() || "(no response)";
+    res.json({
+      ok: true,
+      reply,
+      model,
+      baseURL: process.env.TASK_AI_BASE_URL || "https://api.groq.com/openai/v1",
+      latencyMs,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 

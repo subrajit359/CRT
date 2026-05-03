@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Trophy, Flame, Target, BookOpen, Stethoscope, Sparkles,
   LayoutGrid, Brain, ChevronLeft, ChevronRight,
+  Crown, Medal, Gem, Zap, Star,
 } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
 import Avatar from "../components/Avatar.jsx";
@@ -11,14 +12,14 @@ import { api } from "../lib/api.js";
 
 /* ─── rank badge helpers ─────────────────────────────────────────────────── */
 function getRankTier(rank) {
-  if (rank === 1) return { emoji: "👑", bg: "#FFD700", border: "#B8960C", title: "Champion" };
-  if (rank === 2) return { emoji: "🥈", bg: "#C0C0C0", border: "#8A8A8A", title: "Runner-up" };
-  if (rank === 3) return { emoji: "🥉", bg: "#CD7F32", border: "#8B5A1A", title: "3rd Place" };
-  if (rank <= 10) return { emoji: "💎", bg: "#6366F1", border: "#4338CA", title: `Top 10 · #${rank}` };
-  if (rank <= 25) return { emoji: "⚡", bg: "#06B6D4", border: "#0284C7", title: `Top 25 · #${rank}` };
-  if (rank <= 50) return { emoji: "🔥", bg: "#F59E0B", border: "#B45309", title: `Top 50 · #${rank}` };
-  if (rank <= 100) return { emoji: "⭐", bg: "#8B5CF6", border: "#6D28D9", title: `Top 100 · #${rank}` };
-  return { emoji: "🎯", bg: "#6B7280", border: "#4B5563", title: `#${rank}` };
+  if (rank === 1)   return { Icon: Crown,  iconColor: "#92400e", bg: "#FFD700", border: "#B8960C", title: "Champion" };
+  if (rank === 2)   return { Icon: Medal,  iconColor: "#374151", bg: "#C0C0C0", border: "#8A8A8A", title: "Runner-up" };
+  if (rank === 3)   return { Icon: Medal,  iconColor: "#7c2d12", bg: "#CD7F32", border: "#8B5A1A", title: "3rd Place" };
+  if (rank <= 10)   return { Icon: Gem,    iconColor: "#fff",    bg: "#6366F1", border: "#4338CA", title: `Top 10 · #${rank}` };
+  if (rank <= 25)   return { Icon: Zap,    iconColor: "#fff",    bg: "#06B6D4", border: "#0284C7", title: `Top 25 · #${rank}` };
+  if (rank <= 50)   return { Icon: Flame,  iconColor: "#fff",    bg: "#F59E0B", border: "#B45309", title: `Top 50 · #${rank}` };
+  if (rank <= 100)  return { Icon: Star,   iconColor: "#fff",    bg: "#8B5CF6", border: "#6D28D9", title: `Top 100 · #${rank}` };
+  return                   { Icon: Target, iconColor: "#fff",    bg: "#6B7280", border: "#4B5563", title: `#${rank}` };
 }
 
 function AvatarWithBadge({ url, name, size = 36, rank }) {
@@ -48,7 +49,7 @@ function AvatarWithBadge({ url, name, size = 36, rank }) {
             zIndex: 2,
           }}
         >
-          {tier.emoji}
+          <tier.Icon size={Math.round(badgeSize * 0.58)} color={tier.iconColor} strokeWidth={2} />
         </span>
       )}
     </div>
@@ -112,7 +113,8 @@ function SkeletonRows({ n = 5 }) {
 
 /* ─── podium card ────────────────────────────────────────────────────────── */
 const MEDAL_COLORS = ["#D4A017", "#9E9E9E", "#CD7F32"];
-const MEDAL_ICONS = ["🥇", "🥈", "🥉"];
+const MEDAL_ICONS = [Trophy, Medal, Medal];
+const MEDAL_ICON_COLORS = ["#D4A017", "#9E9E9E", "#CD7F32"];
 
 function PodiumCard({ entry, position, metricLabel, metricSub, leader }) {
   const [, navigate] = useLocation();

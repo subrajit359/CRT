@@ -91,7 +91,7 @@ function BlogPreview() {
   );
 }
 
-const CYCLE_WORDS = ["reasoning", "diagnosis", "decisions"];
+const CYCLE_WORDS = ["reasoning.", "diagnosis.", "decisions."];
 const CASE_QUESTION = "What is your single most urgent next step, and why?";
 
 function CyclingWord() {
@@ -301,7 +301,7 @@ export default function Landing() {
               <span className="dot" /> For final-year medical students
             </motion.span>
             <motion.h1 variants={fadeUp}>
-              Train your clinical <CyclingWord />.<br />Not your memory.
+              Train your clinical <CyclingWord /><br />Not your memory.
             </motion.h1>
             <motion.p variants={fadeUp} className="hero-sub">
               CrLearn puts you in the room. A real case. One sharp question.
@@ -402,16 +402,28 @@ export default function Landing() {
 
       <hr className="section-divider" />
 
-      <Section>
+      <Section style={{ background: "linear-gradient(180deg, var(--bg) 0%, var(--primary-soft) 40%, var(--bg) 100%)" }}>
         <div className="container">
-          <motion.div variants={fadeUp} style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <motion.div variants={fadeUp} style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
             <div>
-              <h2 style={{ marginBottom: 6 }}>From the blog</h2>
-              <p className="muted" style={{ maxWidth: 500, marginTop: 0 }}>
-                Study notes, clinical tips and NEET resources — free to read, no account needed.
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: 7,
+                background: "var(--primary-soft)", color: "var(--primary)",
+                fontSize: 12, fontWeight: 700, letterSpacing: 0.8,
+                textTransform: "uppercase", padding: "5px 12px",
+                borderRadius: "var(--r-pill)", marginBottom: 14,
+                border: "1px solid rgba(79,70,229,0.18)",
+              }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                Free to read
+              </span>
+              <h2 style={{ marginBottom: 10 }}>From the blog</h2>
+              <p style={{ maxWidth: 500, marginTop: 0, fontSize: 17, color: "var(--ink-600)", lineHeight: 1.6 }}>
+                Study notes, clinical tips and NEET resources —{" "}
+                <strong style={{ color: "var(--ink-800)", fontWeight: 600 }}>no account needed.</strong>
               </p>
             </div>
-            <Link href="/blog" className="btn btn-secondary" style={{ whiteSpace: "nowrap" }}>
+            <Link href="/blog" className="btn btn-primary" style={{ whiteSpace: "nowrap" }}>
               View all posts →
             </Link>
           </motion.div>

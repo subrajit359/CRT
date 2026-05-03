@@ -423,6 +423,17 @@ export async function initDb() {
   await query(`ALTER TABLE mock_questions ADD COLUMN IF NOT EXISTS attachment_url TEXT`);
   await query(`ALTER TABLE mock_questions ADD COLUMN IF NOT EXISTS attachment_key TEXT`);
 
+  // ── Mock question seen history (repeat-prevention) ───────────────────────
+  await query(`CREATE TABLE IF NOT EXISTS user_seen_questions (
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    question_id UUID NOT NULL REFERENCES mock_questions(id) ON DELETE CASCADE,
+    specialty   TEXT NOT NULL DEFAULT '',
+    topic       TEXT NOT NULL DEFAULT '',
+    seen_at     TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (user_id, question_id)
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS usq_user_specialty_idx ON user_seen_questions (user_id, specialty, topic)`);
+
   // ── Study Resources ──────────────────────────────────────────────────────
   await query(`CREATE TABLE IF NOT EXISTS study_categories (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -575,6 +586,95 @@ export async function initDb() {
     emailed    BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`);
+
+  // ── v2.0: Semantic match cache ────────────────────────────────────────────
+  // Caches AI diagnosis match results so identical answer+diagnosis pairs
+  // don't trigger a new LLM call. Reduces latency and cuts AI costs.
+  await query(`CREATE TABLE IF NOT EXISTS semantic_match_cache (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cache_key    TEXT UNIQUE NOT NULL,
+    verdict      TEXT NOT NULL,
+    confidence   FLOAT,
+    reason       TEXT,
+    created_at   TIMESTAMPTZ DEFAULT NOW(),
+    hit_count    INT DEFAULT 1
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS semantic_match_cache_key_idx ON semantic_match_cache(cache_key)`);
+
+  // Spaced-repetition review scheduler — SM-2 inspired per-user, per-case schedule.
+  await query(`CREATE TABLE IF NOT EXISTS case_reviews (
+    user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    case_id       UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    PRIMARY KEY   (user_id, case_id),
+    ease_factor   FLOAT NOT NULL DEFAULT 2.5,
+    interval_days INT NOT NULL DEFAULT 1,
+    repetitions   INT NOT NULL DEFAULT 0,
+    next_due      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_score    INT,
+    updated_at    TIMESTAMPTZ DEFAULT NOW()
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS case_reviews_due_idx ON case_reviews (user_id, next_due)`);
+
+  // Background AI job queue — persists job state and progress across SSE streams.
+  await query(`CREATE TABLE IF NOT EXISTS ai_jobs (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kind          TEXT NOT NULL DEFAULT 'case_generate',
+    status        TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','running','done','failed')),
+    created_by    UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TIMESTAMPTZ DEFAULT NOW(),
+    started_at    TIMESTAMPTZ,
+    finished_at   TIMESTAMPTZ,
+    payload       JSONB NOT NULL DEFAULT '{}',
+    total         INT DEFAULT 0,
+    done_count    INT DEFAULT 0,
+    failed_count  INT DEFAULT 0,
+    result        JSONB,
+    error         TEXT
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS ai_jobs_created_at_idx ON ai_jobs(created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS ai_jobs_created_by_idx ON ai_jobs(created_by)`);
+
+  // ── v10: AI insight tip cache ─────────────────────────────────────────────
+  await query(`CREATE TABLE IF NOT EXISTS insight_cache (
+    user_id      UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    tips         JSONB NOT NULL DEFAULT '[]',
+    generated_at TIMESTAMPTZ DEFAULT NOW()
+  )`);
+
+  // ── v6: Achievements ──────────────────────────────────────────────────────
+  await query(`CREATE TABLE IF NOT EXISTS achievements (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key          TEXT NOT NULL,
+    unlocked_at  TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (user_id, key)
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS achievements_user_idx ON achievements (user_id, unlocked_at DESC)`);
+
+  // ── Weekly digest scheduler tables ───────────────────────────────────────
+  await query(`CREATE TABLE IF NOT EXISTS digest_runs (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    triggered_by   TEXT NOT NULL DEFAULT 'scheduler',
+    started_at     TIMESTAMPTZ DEFAULT NOW(),
+    finished_at    TIMESTAMPTZ,
+    total_students INT DEFAULT 0,
+    emails_sent    INT DEFAULT 0,
+    pushes_sent    INT DEFAULT 0,
+    errors         INT DEFAULT 0
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS digest_runs_started_at_idx ON digest_runs(started_at DESC)`);
+  await query(`CREATE TABLE IF NOT EXISTS digest_log (
+    id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id    UUID NOT NULL REFERENCES digest_runs(id) ON DELETE CASCADE,
+    user_id   UUID REFERENCES users(id) ON DELETE SET NULL,
+    sent_at   TIMESTAMPTZ DEFAULT NOW(),
+    email_ok  BOOLEAN DEFAULT FALSE,
+    push_ok   BOOLEAN DEFAULT FALSE,
+    error     TEXT
+  )`);
+  await query(`CREATE INDEX IF NOT EXISTS digest_log_run_idx  ON digest_log(run_id, sent_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS digest_log_user_idx ON digest_log(user_id, sent_at DESC)`);
 
   console.log("[db] schema ready");
 }

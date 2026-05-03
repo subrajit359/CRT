@@ -54,6 +54,36 @@ function tryParseJson(text) {
   return null;
 }
 
+function normalizeText(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function looksCopied(studentAnswer, prompt, correctAnswer, explanation) {
+  const a = normalizeText(studentAnswer);
+  const p = normalizeText(`${prompt} ${correctAnswer} ${explanation || ""}`);
+  if (!a || !p) return false;
+  if (a === p) return true;
+  const aWords = a.split(" ").filter(Boolean);
+  const pWords = p.split(" ").filter(Boolean);
+  if (aWords.length < 6 || pWords.length < 6) return false;
+  const shared = aWords.filter((w) => pWords.includes(w)).length;
+  return shared / Math.min(aWords.length, pWords.length) > 0.75;
+}
+
+function answerFocusScore(studentAnswer, correctAnswer) {
+  const a = normalizeText(studentAnswer);
+  const c = normalizeText(correctAnswer);
+  if (!a || !c) return 0;
+  const aWords = a.split(" ").filter(Boolean);
+  const cWords = c.split(" ").filter(Boolean);
+  const hits = cWords.filter((w) => aWords.includes(w)).length;
+  return hits / Math.max(1, cWords.length);
+}
+
 async function generateAiQuestions({ specialty, topic, types, count, marksPerQ }) {
   if (count <= 0) return [];
   const wanted = types && types.length ? types : ["mcq"];
@@ -160,18 +190,60 @@ router.post("/tests", requireAuth(["student", "doctor", "admin"]), async (req, r
     const negative = !!req.body?.negativeMarking;
     const desiredCount = Math.max(5, Math.min(50, Number(req.body?.count) || Math.round(totalMarks)));
     const marksPerQ = +(totalMarks / desiredCount).toFixed(2);
+    const userId = req.user.id;
 
-    const params = [types];
-    let where = `type = ANY($1::text[])`;
-    if (specialty) { params.push(specialty); where += ` AND specialty = $${params.length}`; }
-    if (topic) { params.push(topic); where += ` AND topic = $${params.length}`; }
+    // Build base WHERE clause for the question bank
+    const filterParams = [types];
+    let filterWhere = `type = ANY($1::text[])`;
+    if (specialty) { filterParams.push(specialty); filterWhere += ` AND specialty = $${filterParams.length}`; }
+    if (topic) { filterParams.push(topic); filterWhere += ` AND topic = $${filterParams.length}`; }
+
+    // Count total bank questions matching this filter
+    const { rows: countRows } = await query(
+      `SELECT COUNT(*) AS total FROM mock_questions WHERE ${filterWhere}`,
+      filterParams
+    );
+    const totalInBank = Number(countRows[0]?.total || 0);
+
+    // Count how many of those the user has already seen
+    const { rows: seenCountRows } = await query(
+      `SELECT COUNT(*) AS seen
+         FROM user_seen_questions usq
+         JOIN mock_questions q ON q.id = usq.question_id
+        WHERE usq.user_id = $1
+          AND ${filterWhere.replace(/\$(\d+)/g, (_, n) => `$${Number(n) + 1}`)}`,
+      [userId, ...filterParams.slice(1)]
+    );
+    const seenCount = Number(seenCountRows[0]?.seen || 0);
+
+    // If user has seen all (or nearly all) questions → reset their history for this filter
+    const unseenCount = totalInBank - seenCount;
+    if (totalInBank > 0 && unseenCount < desiredCount) {
+      const resetParams = [userId];
+      let resetWhere = ``;
+      if (specialty) { resetParams.push(specialty); resetWhere += ` AND q.specialty = $${resetParams.length}`; }
+      if (topic) { resetParams.push(topic); resetWhere += ` AND q.topic = $${resetParams.length}`; }
+      await query(
+        `DELETE FROM user_seen_questions usq
+          USING mock_questions q
+         WHERE usq.question_id = q.id
+           AND usq.user_id = $1${resetWhere}`,
+        resetParams
+      );
+    }
+
+    // Pull unseen questions first (exclude already-seen IDs for this user)
     const { rows: bank } = await query(
-      `SELECT id, type, specialty, topic, prompt, options, correct_answer, explanation, marks, source, attachment_url
-         FROM mock_questions
-        WHERE ${where}
+      `SELECT q.id, q.type, q.specialty, q.topic, q.prompt, q.options,
+              q.correct_answer, q.explanation, q.marks, q.source, q.attachment_url
+         FROM mock_questions q
+        WHERE ${filterWhere}
+          AND q.id NOT IN (
+            SELECT usq.question_id FROM user_seen_questions usq WHERE usq.user_id = $${filterParams.length + 1}
+          )
         ORDER BY random()
         LIMIT ${desiredCount}`,
-      params
+      [...filterParams, userId]
     );
 
     let pool = bank.map((q) => ({
@@ -188,6 +260,7 @@ router.post("/tests", requireAuth(["student", "doctor", "admin"]), async (req, r
       attachment_url: q.attachment_url || null,
     }));
 
+    // Fill remaining slots with AI-generated questions if bank is short
     const remaining = desiredCount - pool.length;
     if (remaining > 0) {
       const aiq = await generateAiQuestions({ specialty, topic, types, count: remaining, marksPerQ });
@@ -198,6 +271,18 @@ router.post("/tests", requireAuth(["student", "doctor", "admin"]), async (req, r
       return res.status(503).json({
         error: "No questions could be prepared. Add questions to the bank or configure the AI provider.",
       });
+    }
+
+    // Mark bank questions as seen for this user (AI-generated ones have no persistent ID)
+    const bankIds = pool.filter((q) => q.id && q.source !== undefined).map((q) => q.id);
+    if (bankIds.length > 0) {
+      const valClauses = bankIds.map((_, i) => `($1, $${i + 2}, $${bankIds.length + 2}, $${bankIds.length + 3})`).join(", ");
+      await query(
+        `INSERT INTO user_seen_questions (user_id, question_id, specialty, topic)
+         VALUES ${valClauses}
+         ON CONFLICT (user_id, question_id) DO NOTHING`,
+        [userId, ...bankIds, specialty, topic]
+      );
     }
 
     const sumMarks = pool.reduce((s, q) => s + (Number(q.marks) || 1), 0);
@@ -213,7 +298,7 @@ router.post("/tests", requireAuth(["student", "doctor", "admin"]), async (req, r
       `INSERT INTO mock_tests (user_id, config, questions, total_marks)
        VALUES ($1, $2::jsonb, $3::jsonb, $4)
        RETURNING id`,
-      [req.user.id, JSON.stringify(config), JSON.stringify(pool), realTotal]
+      [userId, JSON.stringify(config), JSON.stringify(pool), realTotal]
     );
     const id = rows[0].id;
 
@@ -230,10 +315,19 @@ router.post("/tests", requireAuth(["student", "doctor", "admin"]), async (req, r
 // Returns { score: 0.0-1.0, verdict: "CORRECT"|"PARTIAL"|"INCORRECT", reason: string }
 async function aiMatchAnswer(prompt, correctAnswer, studentAnswer) {
   if (!studentAnswer || !correctAnswer) return { score: 0, verdict: "INCORRECT", reason: "No answer" };
+  if (looksCopied(studentAnswer, prompt, correctAnswer)) {
+    return { score: 0, verdict: "INCORRECT", reason: "Copied prompt/model answer instead of answering." };
+  }
+  const focus = answerFocusScore(studentAnswer, correctAnswer);
+  if (focus < 0.25) {
+    return { score: 0, verdict: "INCORRECT", reason: "Answer is not focused on the expected stored answer." };
+  }
   const sys =
     "You are a clinical examiner grading a student's short or long answer. " +
     "Compare the student's answer to the model answer. Match on medical CONTENT, not wording. " +
     "Synonyms, abbreviations, and different phrasings are acceptable. " +
+    "Judge only the student's answer itself. Ignore copied question text and unrelated case text. " +
+    "If the student copies the prompt or model answer instead of giving their own reasoning, mark INCORRECT. " +
     "Reply ONLY in this format on three lines:\n" +
     "Verdict: CORRECT | PARTIAL | INCORRECT\nConfidence: <0.0-1.0>\nReason: <one short sentence>";
   const user =

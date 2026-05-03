@@ -2,9 +2,42 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "wouter";
 import { CheckCircle2, Lock, RotateCcw, X } from "lucide-react";
-import { api } from "../lib/api.js";
+import { api, getToken, apiUrl } from "../lib/api.js";
 import { useRioCase } from "../lib/rioContext.jsx";
 import drRioAvatar from "../assets/dr-rio.png";
+
+// ── v3: Parse SSE stream into typed events ─────────────────────────────────
+async function* parseSSE(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let eventType = "message";
+  let dataLines = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newlineIdx;
+    while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIdx).replace(/\r$/, "");
+      buffer = buffer.slice(newlineIdx + 1);
+      if (line === "") {
+        if (dataLines.length > 0) {
+          const dataStr = dataLines.join("\n");
+          try { yield { event: eventType, data: JSON.parse(dataStr) }; }
+          catch { yield { event: eventType, data: { raw: dataStr } }; }
+        }
+        eventType = "message";
+        dataLines = [];
+      } else if (line.startsWith("event:")) {
+        eventType = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trim());
+      }
+    }
+  }
+}
 
 const STORAGE_KEY = "rio:history:v1";
 const POS_KEY = "rio:launcherPos:v1";
@@ -167,6 +200,7 @@ export default function DrRioWidget(props = {}) {
     if (messages.length) saveHistory(caseId, messages);
   }, [messages, caseId]);
 
+  // ── v3: Streaming send — tokens appear word by word like ChatGPT ───────────
   async function send(text) {
     const t = (text ?? input).trim();
     if (!t || busy) return;
@@ -174,18 +208,87 @@ export default function DrRioWidget(props = {}) {
     setMessages(next);
     setInput("");
     setBusy(true);
+
+    // Add a streaming placeholder so the user sees the bubble immediately
+    setMessages((m) => [...m, { role: "assistant", content: "", streaming: true }]);
+
     try {
-      const r = await api.post("/api/assistant/rio", {
-        caseId: caseId || null,
-        message: t,
-        history: next.slice(-10, -1), // exclude the current user msg; backend appends it
+      const token = getToken();
+      const response = await fetch(apiUrl("/api/assistant/rio/stream"), {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "text/event-stream",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          caseId: caseId || null,
+          message: t,
+          history: next.slice(-10, -1),
+        }),
       });
-      const reply = r.reply || "I'm not sure how to help with that.";
-      setMessages((m) => [...m, { role: "assistant", content: reply, suggestAdmin: !!r.suggestAdmin }]);
-      if (r.suggestAdmin && r.adminContact) setAdminContact(r.adminContact);
-      if (typeof r.revealAllowed === "boolean") setRevealAllowed(r.revealAllowed);
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || `Request failed (${response.status})`);
+      }
+
+      let accumulated = "";
+
+      for await (const { event, data } of parseSSE(response)) {
+        if (event === "token") {
+          accumulated += data.text || "";
+          setMessages((m) => {
+            const updated = [...m];
+            const last = updated[updated.length - 1];
+            if (last?.streaming) updated[updated.length - 1] = { ...last, content: accumulated };
+            return updated;
+          });
+        } else if (event === "override") {
+          // Leak guard tripped — replace streamed content with safe response
+          accumulated = data.text || "";
+          setMessages((m) => {
+            const updated = [...m];
+            const last = updated[updated.length - 1];
+            if (last?.streaming) updated[updated.length - 1] = { ...last, content: accumulated };
+            return updated;
+          });
+        } else if (event === "done") {
+          // Finalize the streaming message
+          setMessages((m) => {
+            const updated = [...m];
+            const last = updated[updated.length - 1];
+            if (last?.streaming) {
+              updated[updated.length - 1] = {
+                role: "assistant",
+                content: accumulated || "I'm not sure how to help with that.",
+                suggestAdmin: !!data.suggestAdmin,
+              };
+            }
+            return updated;
+          });
+          if (data.suggestAdmin && data.adminContact) setAdminContact(data.adminContact);
+          if (typeof data.revealAllowed === "boolean") setRevealAllowed(data.revealAllowed);
+        } else if (event === "error") {
+          throw new Error(data.message || "Stream error");
+        }
+      }
     } catch (e) {
-      setMessages((m) => [...m, { role: "assistant", content: `Sorry — I couldn't reach the AI (${e.message}).`, error: true }]);
+      setMessages((m) => {
+        const updated = [...m];
+        const last = updated[updated.length - 1];
+        if (last?.streaming) {
+          updated[updated.length - 1] = {
+            role: "assistant",
+            content: `Sorry — I couldn't reach the AI (${e.message}).`,
+            error: true,
+          };
+        } else {
+          updated.push({ role: "assistant", content: `Sorry — I couldn't reach the AI (${e.message}).`, error: true });
+        }
+        return updated;
+      });
     } finally {
       setBusy(false);
     }

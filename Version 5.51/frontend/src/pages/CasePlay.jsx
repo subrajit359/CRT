@@ -5,7 +5,8 @@ import {
   Check, X, MessageSquare, Link2, BookOpen, ThumbsUp, FileText, RotateCw,
 } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
-import { api } from "../lib/api.js";
+import { api, getToken, apiUrl } from "../lib/api.js";
+
 import { useToast } from "../components/Toast.jsx";
 import VerifiedBadge from "../components/VerifiedBadge.jsx";
 import EvalResult from "../components/EvalResult.jsx";
@@ -15,6 +16,39 @@ import Skeleton, { SkeletonStack } from "../components/Skeleton.jsx";
 import { useAuth } from "../lib/auth.jsx";
 import { useSetRioCase } from "../lib/rioContext.jsx";
 import LevelUpModal from "../components/LevelUpModal.jsx";
+
+// ── v3: Parse SSE stream into typed events ─────────────────────────────────
+async function* parseSSE(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let eventType = "message";
+  let dataLines = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newlineIdx;
+    while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIdx).replace(/\r$/, "");
+      buffer = buffer.slice(newlineIdx + 1);
+      if (line === "") {
+        if (dataLines.length > 0) {
+          const dataStr = dataLines.join("\n");
+          try { yield { event: eventType, data: JSON.parse(dataStr) }; }
+          catch { yield { event: eventType, data: { raw: dataStr } }; }
+        }
+        eventType = "message";
+        dataLines = [];
+      } else if (line.startsWith("event:")) {
+        eventType = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trim());
+      }
+    }
+  }
+}
 
 export default function CasePlay() {
   const params = useParams();
@@ -110,21 +144,71 @@ export default function CasePlay() {
     }
   }
 
+  // ── v3: Streaming submit — diagnosis verdict appears instantly,
+  //        then AI feedback streams in word by word.
   async function submit() {
     if (answer.trim().length < 10) {
       toast.error("Write at least a sentence — short answers can't be evaluated.");
       return;
     }
     setBusy(true);
+    setResult(null);
+
     try {
-      const r = await api.post("/api/eval", { caseId: params.id, userAnswer: answer });
-      setResult(r);
-      if (r.leveledUp && r.newLevel) {
-        setLevelUpLevel(r.newLevel);
-        setLevelUpOpen(true);
+      const token = getToken();
+      const response = await fetch(apiUrl("/api/eval/stream"), {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "text/event-stream",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ caseId: params.id, userAnswer: answer }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || `Eval failed (${response.status})`);
       }
-    } catch (e) { toast.error(e.message); }
-    finally { setBusy(false); }
+
+      let acc = {
+        evalText: "", diagnosisCorrect: null, matchedAlias: null,
+        semanticMatch: null, correctDiagnosis: null, diagnosisExplanation: null,
+        caseVerified: false, practice: false, score: null,
+        leveledUp: false, newLevel: null, ok: true,
+      };
+
+      for await (const { event, data } of parseSSE(response)) {
+        if (event === "meta") {
+          acc = { ...acc, ...data };
+          setResult({ ...acc });
+        } else if (event === "token") {
+          acc.evalText += data.text || "";
+          setResult({ ...acc });
+        } else if (event === "done") {
+          acc = { ...acc, ...data };
+          setResult({ ...acc });
+          if (data.leveledUp && data.newLevel) {
+            setLevelUpLevel(data.newLevel);
+            setLevelUpOpen(true);
+          }
+          if (data.newAchievements?.length) {
+            data.newAchievements.forEach((a, i) => {
+              setTimeout(() => {
+                toast.success(`Achievement unlocked: ${a.title} (+${a.xp} XP)`);
+              }, i * 800);
+            });
+          }
+        } else if (event === "error") {
+          throw new Error(data.message || "Eval stream error");
+        }
+      }
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Find the current case's index inside the loaded group (or -1 if not in group).
@@ -563,6 +647,7 @@ export default function CasePlay() {
               <EvalResult
                 text={result.evalText}
                 diagnosisCorrect={result.diagnosisCorrect}
+                semanticMatch={result.semanticMatch}
                 correctDiagnosis={result.correctDiagnosis}
                 diagnosisExplanation={result.diagnosisExplanation}
                 verifyCount={liveVerifyCount}

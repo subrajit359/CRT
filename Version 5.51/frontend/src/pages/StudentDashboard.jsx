@@ -54,6 +54,7 @@ export default function StudentDashboard() {
 
   const [rankInfo, setRankInfo] = useState(null);
   const [totalCases, setTotalCases] = useState(null);
+  const [xpInfo, setXpInfo] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -69,13 +70,15 @@ export default function StudentDashboard() {
       softFetch("/api/eval/changes", { events: [] }),
       softFetch("/api/leaderboard?period=all&page=1&pageSize=1", null),
       softFetch("/api/cases/count", { total: 0 }),
-    ]).then(([s, n, c, lb, tc]) => {
+      softFetch("/api/achievements", null),
+    ]).then(([s, n, c, lb, tc, ach]) => {
       if (!alive) return;
       setStats(s);
       setNext(n);
       setChanges(c);
       setRankInfo(lb);
       setTotalCases(tc?.total ?? 0);
+      setXpInfo(ach);
       setLoading(false);
       const cur = Number(s?.streak || 0);
       let prev = 0;
@@ -227,6 +230,36 @@ export default function StudentDashboard() {
             loading={loading}
             asExtra
           />
+          <div
+            className="stat-card"
+            role="button"
+            tabIndex={0}
+            onClick={() => navigate("/progress")}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate("/progress"); } }}
+            style={{ cursor: "pointer" }}
+          >
+            <div className="stat-card-top">
+              <span className="stat-card-label">Total XP</span>
+              {!loading && xpInfo && (
+                <span style={{ fontSize: 11, color: "var(--primary)", fontWeight: 700 }}>
+                  {xpInfo.unlockedCount}/{xpInfo.totalCount} badges
+                </span>
+              )}
+            </div>
+            <div className="stat-card-value">
+              {loading ? <Skeleton height={28} width={80} /> : (
+                <span style={{ color: "var(--primary)" }}>{(xpInfo?.xp ?? 0).toLocaleString()}</span>
+              )}
+            </div>
+            <div className="stat-card-sub">
+              {loading ? <Skeleton height={10} width={120} /> : "experience points earned"}
+            </div>
+            {!loading && xpInfo && (
+              <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-500)" }}>
+                View achievements →
+              </div>
+            )}
+          </div>
           <RankCard
             rankInfo={rankInfo}
             loading={loading}

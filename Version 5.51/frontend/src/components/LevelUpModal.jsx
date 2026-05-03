@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Trophy, Star, Sparkles, Dumbbell } from "lucide-react";
 import Confetti from "./Confetti.jsx";
 
 export default function LevelUpModal({ open, newLevel, onClose }) {
@@ -22,7 +23,7 @@ export default function LevelUpModal({ open, newLevel, onClose }) {
     onClose?.();
   }
 
-  const stars = ["⭐", "🌟", "✨"];
+  const starIcons = [Star, Sparkles, Star];
 
   return (
     <div
@@ -90,16 +91,17 @@ export default function LevelUpModal({ open, newLevel, onClose }) {
           .levelup-close-btn:active { transform: translateY(0); opacity: 1; }
         `}</style>
 
-        <div style={{ fontSize: 64, lineHeight: 1, marginBottom: 8 }} className="levelup-badge">
-          🏆
+        <div style={{ lineHeight: 1, marginBottom: 8, color: "#d97706" }} className="levelup-badge">
+          <Trophy size={64} strokeWidth={1.5} />
         </div>
 
         <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--emerald, #059669)", marginBottom: 6 }}>
           Level Up!
         </div>
 
-        <div style={{ fontSize: 30, fontWeight: 800, color: "var(--ink-900, #0f172a)", fontFamily: "var(--font-display)", lineHeight: 1.15, marginBottom: 4 }}>
-          You reached Level {newLevel} 🎉
+        <div style={{ fontSize: 30, fontWeight: 800, color: "var(--ink-900, #0f172a)", fontFamily: "var(--font-display)", lineHeight: 1.15, marginBottom: 4, display: "flex", alignItems: "center", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
+          <span>You reached Level {newLevel}</span>
+          <Sparkles size={26} color="#d97706" />
         </div>
 
         <div style={{ fontSize: 15, color: "var(--text-muted, #64748b)", marginTop: 10, lineHeight: 1.55 }}>
@@ -107,14 +109,16 @@ export default function LevelUpModal({ open, newLevel, onClose }) {
           Keep solving cases to climb higher!
         </div>
 
-        <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 18, fontSize: 20 }}>
-          {stars.map((s, i) => (
-            <span key={i} style={{ animation: `levelUpFloat ${1.8 + i * 0.3}s ease-in-out ${i * 0.15}s infinite` }}>{s}</span>
+        <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 18 }}>
+          {starIcons.map((Icon, i) => (
+            <span key={i} style={{ animation: `levelUpFloat ${1.8 + i * 0.3}s ease-in-out ${i * 0.15}s infinite`, color: "#d97706", display: "flex" }}>
+              <Icon size={22} strokeWidth={1.75} />
+            </span>
           ))}
         </div>
 
-        <button className="levelup-close-btn" onClick={dismiss} autoFocus>
-          Keep Going! 💪
+        <button className="levelup-close-btn" onClick={dismiss} autoFocus style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          <Dumbbell size={16} /> Keep Going!
         </button>
       </div>
     </div>

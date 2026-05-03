@@ -28,8 +28,13 @@ import studyRoutes from "./routes/study.js";
 import dxRoutes from "./routes/dx.js";
 import blogRoutes from "./routes/blog.js";
 import neetRoutes from "./routes/neet.js";
+import achievementsRoutes from "./routes/achievements.js";
+import insightsRoutes from "./routes/insights.js";
+import aiRoomRoutes from "./routes/aiRoom.js";
 import { isMailerConfigured, sendMail } from "./mailer.js";
 import { query as dbQuery } from "./db.js";
+import { startDigestScheduler } from "./digestScheduler.js";
+import { startNotificationScheduler } from "./notificationScheduler.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
@@ -81,6 +86,9 @@ app.use("/api/study", studyRoutes);
 app.use("/api/dx", dxRoutes);
 app.use("/api/blog", blogRoutes);
 app.use("/neet-api", neetRoutes);
+app.use("/api/achievements", achievementsRoutes);
+app.use("/api/insights", insightsRoutes);
+app.use("/api/admin/ai-room", aiRoomRoutes);
 // In-memory rate limiter for contact form: max 3 submissions per IP per hour
 const contactRateMap = new Map();
 function contactRateLimit(req, res, next) {
@@ -183,6 +191,8 @@ async function start() {
   await initDb();
   startAdminLogPushBridge();
   startDisappearingSweeper();
+  startDigestScheduler();
+  startNotificationScheduler();
 
   if (API_ONLY) {
     app.get("/", (_req, res) => {
