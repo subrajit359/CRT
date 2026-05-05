@@ -1,0 +1,58 @@
+import{r as s,a as e}from"./vendor-react-q9arMp5r.js";import{A as f}from"./index-CEa7VWaF.js";import{L as h}from"./vendor-router-BH-DgxJe.js";import{v as g,k as N,aF as x}from"./vendor-icons-CHC1Tcuf.js";import"./vendor-react-dom-DOkCZvSq.js";import"./vendor-misc-DqsnOac5.js";import"./vendor-motion-DmWiHZDz.js";const b=`
+.contact-wrap {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 40px 20px 80px;
+}
+.contact-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.contact-info-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px 20px;
+  min-width: 0;
+}
+.contact-info-value {
+  font-size: 14px;
+  color: var(--ink-800);
+  font-weight: 600;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+.contact-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 520px) {
+  .contact-wrap {
+    padding: 24px 16px 64px;
+  }
+  .contact-info-grid {
+    grid-template-columns: 1fr;
+  }
+  .contact-info-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+  }
+  .contact-info-card-body {
+    min-width: 0;
+  }
+  .contact-info-value {
+    font-size: 13px;
+  }
+  .contact-form-row {
+    grid-template-columns: 1fr;
+  }
+  .contact-title {
+    font-size: 24px !important;
+  }
+}
+`;function E(){const[m,u]=s.useState(!1),[o,t]=s.useState({name:"",email:"",subject:"",message:""}),[i,l]=s.useState(!1),[c,a]=s.useState(""),d=async r=>{if(r.preventDefault(),!o.name.trim()||!o.email.trim()||!o.message.trim()){a("Please fill in all required fields.");return}l(!0),a("");try{(await fetch("/api/contact",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(o)})).ok?u(!0):a("Something went wrong. Please email us directly.")}catch{a("Could not send. Please email us directly at clinicalreasoningofficial@gmail.com")}finally{l(!1)}};return e.jsxDEV(f,{children:[e.jsxDEV("style",{children:b},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:99,columnNumber:7},this),e.jsxDEV("div",{className:"contact-wrap",children:[e.jsxDEV("div",{style:{marginBottom:32},children:e.jsxDEV(h,{href:"/",style:{fontSize:13,color:"var(--ink-400)",textDecoration:"none",display:"inline-flex",alignItems:"center",gap:6},children:"← Back to home"},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:102,columnNumber:11},this)},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:101,columnNumber:9},this),e.jsxDEV("div",{style:{display:"flex",alignItems:"center",gap:16,marginBottom:32},children:[e.jsxDEV("div",{style:{width:52,height:52,borderRadius:16,flexShrink:0,background:"linear-gradient(135deg, #0ea5e9, #0284c7)",display:"grid",placeItems:"center"},children:e.jsxDEV("svg",{width:"26",height:"26",viewBox:"0 0 24 24",fill:"none",stroke:"#fff",strokeWidth:"1.75",strokeLinecap:"round",strokeLinejoin:"round",children:[e.jsxDEV("path",{d:"M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:114,columnNumber:15},this),e.jsxDEV("polyline",{points:"22,6 12,13 2,6"},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:115,columnNumber:15},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:113,columnNumber:13},this)},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:108,columnNumber:11},this),e.jsxDEV("div",{children:[e.jsxDEV("h1",{className:"contact-title",style:{margin:0,fontSize:28,fontWeight:800,color:"var(--ink-900)"},children:"Contact Us"},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:119,columnNumber:13},this),e.jsxDEV("p",{style:{margin:0,fontSize:14,color:"var(--ink-400)"},children:"We usually reply within 24 hours"},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:120,columnNumber:13},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:118,columnNumber:11},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:107,columnNumber:9},this),e.jsxDEV("div",{className:"contact-info-grid",children:[{Icon:g,label:"Email",value:"clinicalreasoningofficial@gmail.com"},{Icon:N,label:"Response time",value:"Within 24 hours"}].map(({Icon:r,label:n,value:p})=>e.jsxDEV("div",{className:"contact-info-card",children:[e.jsxDEV("div",{style:{color:"var(--primary)",flexShrink:0,marginBottom:6},className:"contact-info-icon",children:e.jsxDEV(r,{size:22,strokeWidth:1.75},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:131,columnNumber:17},this)},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:130,columnNumber:15},this),e.jsxDEV("div",{className:"contact-info-card-body",children:[e.jsxDEV("div",{style:{fontSize:12,color:"var(--ink-400)",fontWeight:600,textTransform:"uppercase",letterSpacing:.5,marginBottom:4},children:n},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:134,columnNumber:17},this),e.jsxDEV("div",{className:"contact-info-value",children:p},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:137,columnNumber:17},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:133,columnNumber:15},this)]},n,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:129,columnNumber:13},this))},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:124,columnNumber:9},this),m?e.jsxDEV("div",{style:{background:"rgba(5,150,105,0.08)",border:"1.5px solid rgba(5,150,105,0.25)",borderRadius:18,padding:"36px 32px",textAlign:"center"},children:[e.jsxDEV("div",{style:{marginBottom:12,color:"#059669"},children:e.jsxDEV(x,{size:40,strokeWidth:1.5},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:148,columnNumber:65},this)},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:148,columnNumber:13},this),e.jsxDEV("h2",{style:{margin:"0 0 8px",fontSize:20,fontWeight:700,color:"var(--ink-900)"},children:"Message sent!"},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:149,columnNumber:13},this),e.jsxDEV("p",{style:{margin:0,color:"var(--ink-500)",fontSize:14},children:"Thanks for reaching out. We'll get back to you within 24 hours."},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:150,columnNumber:13},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:144,columnNumber:11},this):e.jsxDEV("form",{onSubmit:d,style:{background:"var(--bg-elev)",border:"1px solid var(--line)",borderRadius:18,padding:"28px",display:"flex",flexDirection:"column",gap:18},children:[e.jsxDEV("div",{className:"contact-form-row",children:[e.jsxDEV("div",{children:[e.jsxDEV("label",{style:{fontSize:13,fontWeight:600,color:"var(--ink-700)",display:"block",marginBottom:6},children:["Name ",e.jsxDEV("span",{style:{color:"var(--danger)"},children:"*"},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:163,columnNumber:24},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:162,columnNumber:17},this),e.jsxDEV("input",{className:"input",type:"text",placeholder:"Your name",value:o.name,onChange:r=>t(n=>({...n,name:r.target.value})),style:{width:"100%",boxSizing:"border-box"}},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:165,columnNumber:17},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:161,columnNumber:15},this),e.jsxDEV("div",{children:[e.jsxDEV("label",{style:{fontSize:13,fontWeight:600,color:"var(--ink-700)",display:"block",marginBottom:6},children:["Email ",e.jsxDEV("span",{style:{color:"var(--danger)"},children:"*"},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:176,columnNumber:25},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:175,columnNumber:17},this),e.jsxDEV("input",{className:"input",type:"email",placeholder:"your@email.com",value:o.email,onChange:r=>t(n=>({...n,email:r.target.value})),style:{width:"100%",boxSizing:"border-box"}},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:178,columnNumber:17},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:174,columnNumber:15},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:160,columnNumber:13},this),e.jsxDEV("div",{children:[e.jsxDEV("label",{style:{fontSize:13,fontWeight:600,color:"var(--ink-700)",display:"block",marginBottom:6},children:"Subject"},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:190,columnNumber:15},this),e.jsxDEV("input",{className:"input",type:"text",placeholder:"e.g. Bug report, Feature request, General query",value:o.subject,onChange:r=>t(n=>({...n,subject:r.target.value})),style:{width:"100%",boxSizing:"border-box"}},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:193,columnNumber:15},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:189,columnNumber:13},this),e.jsxDEV("div",{children:[e.jsxDEV("label",{style:{fontSize:13,fontWeight:600,color:"var(--ink-700)",display:"block",marginBottom:6},children:["Message ",e.jsxDEV("span",{style:{color:"var(--danger)"},children:"*"},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:205,columnNumber:25},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:204,columnNumber:15},this),e.jsxDEV("textarea",{className:"input",rows:5,placeholder:"Tell us what's on your mind...",value:o.message,onChange:r=>t(n=>({...n,message:r.target.value})),style:{width:"100%",boxSizing:"border-box",resize:"vertical",minHeight:120}},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:207,columnNumber:15},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:203,columnNumber:13},this),c&&e.jsxDEV("div",{style:{fontSize:13,color:"var(--danger)",background:"rgba(220,38,38,0.07)",borderRadius:8,padding:"10px 14px"},children:c},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:218,columnNumber:15},this),e.jsxDEV("button",{type:"submit",className:"btn btn-primary",disabled:i,style:{alignSelf:"flex-start",minWidth:140},children:i?"Sending…":"Send message →"},void 0,!1,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:223,columnNumber:13},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:155,columnNumber:11},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:100,columnNumber:7},this)]},void 0,!0,{fileName:"/home/runner/workspace/CRT/frontend/src/pages/Contact.jsx",lineNumber:98,columnNumber:5},this)}export{E as default};
