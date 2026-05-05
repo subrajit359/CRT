@@ -657,6 +657,84 @@ router.get("/next", requireAuth(), async (req, res) => {
   res.json(_nextResult);
 });
 
+// GET /api/eval/level-progress — current level & advancement conditions
+router.get("/level-progress", requireAuth(["student"]), async (req, res) => {
+  const userId = req.user.id;
+
+  const { rows: profileRows } = await query(
+    `SELECT sp.global_level,
+            (SELECT COUNT(*)::int FROM responses WHERE user_id=$1) AS total
+     FROM student_profiles sp WHERE sp.user_id=$1`,
+    [userId]
+  );
+
+  const level = profileRows[0]?.global_level ?? 1;
+  const total = profileRows[0]?.total ?? 0;
+  const minAttempts = Math.floor(6 * level * (level + 1) / 5);
+  const win = 5 * level;
+  const requiredAvg = parseFloat((4.0 + (level - 1) * 0.1).toFixed(1));
+
+  const { rows: recentRows } = await query(
+    `SELECT COALESCE(AVG(score), 0)::float AS avg FROM (
+       SELECT score FROM responses
+       WHERE user_id=$1 AND score IS NOT NULL ORDER BY created_at DESC LIMIT $2
+     ) recent`,
+    [userId, win]
+  );
+
+  const recentAvg = parseFloat(((recentRows[0]?.avg) ?? 0).toFixed(2));
+  const attemptsReached = total >= minAttempts;
+  const scoreReached = recentAvg >= requiredAvg;
+  const attemptsPct = Math.min(100, Math.round((total / Math.max(minAttempts, 1)) * 100));
+  const scorePct = Math.min(100, Math.round((recentAvg / Math.max(requiredAvg, 1)) * 100));
+  const overallPct = Math.round((attemptsPct + scorePct) / 2);
+
+  res.json({
+    level, total, minAttempts, window: win, requiredAvg, recentAvg,
+    attemptsPct, scorePct, overallPct, attemptsReached, scoreReached,
+  });
+});
+
+// GET /api/eval/level-cases — paginated cases matched to user's level band
+router.get("/level-cases", requireAuth(["student"]), async (req, res) => {
+  const userId = req.user.id;
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = 20;
+  const offset = (page - 1) * limit;
+
+  const { rows: profileRows } = await query(
+    `SELECT global_level FROM student_profiles WHERE user_id=$1`,
+    [userId]
+  );
+
+  const userLevel = profileRows[0]?.global_level ?? 1;
+  const minLevel = Math.max(1, userLevel - 1);
+  const maxLevel = userLevel + 1;
+
+  const [{ rows: cases }, { rows: countRows }] = await Promise.all([
+    query(
+      `SELECT c.id, c.title, c.specialty, c.level,
+              (SELECT COUNT(*)::int FROM case_verifications WHERE case_id=c.id AND action='verify') AS verify_count,
+              EXISTS(SELECT 1 FROM responses WHERE user_id=$1 AND case_id=c.id)::boolean AS attempted,
+              (SELECT AVG(score)::float FROM responses WHERE user_id=$1 AND case_id=c.id AND score IS NOT NULL) AS "myAvg"
+         FROM cases c
+        WHERE c.deleted_at IS NULL
+          AND c.level >= $2 AND c.level <= $3
+        ORDER BY c.level ASC, c.created_at DESC
+        LIMIT $4 OFFSET $5`,
+      [userId, minLevel, maxLevel, limit, offset]
+    ),
+    query(
+      `SELECT COUNT(*)::int AS total FROM cases c
+        WHERE c.deleted_at IS NULL AND c.level >= $1 AND c.level <= $2`,
+      [minLevel, maxLevel]
+    ),
+  ]);
+
+  const total = countRows[0]?.total ?? 0;
+  res.json({ cases, total, userLevel, minLevel, maxLevel });
+});
+
 router.get("/changes", requireAuth(), async (req, res) => {
   const userId = req.user.id;
   const _ck = `eval:changes:${userId}`;
