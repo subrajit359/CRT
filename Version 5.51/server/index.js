@@ -49,19 +49,24 @@ app.set("trust proxy", 1);
 app.use(compression({ level: 6, threshold: 1024 }));
 
 const corsOriginEnv = (process.env.CORS_ORIGIN || "").trim();
-if (corsOriginEnv) {
-  const allowList = corsOriginEnv.split(",").map((s) => s.trim()).filter(Boolean);
-  app.use(cors({
-    origin(origin, cb) {
-      if (!origin) return cb(null, true);
-      if (allowList.includes("*")) return cb(null, true);
-      if (allowList.includes(origin)) return cb(null, origin);
-      return cb(new Error(`CORS: origin ${origin} not allowed`));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-  }));
-}
+const allowList = corsOriginEnv ? corsOriginEnv.split(",").map((s) => s.trim()).filter(Boolean) : [];
+
+const corsOptions = {
+  origin(origin, cb) {
+    if (!origin) return cb(null, true);
+    if (!corsOriginEnv) return cb(null, true);
+    if (allowList.includes("*")) return cb(null, true);
+    if (allowList.includes(origin)) return cb(null, origin);
+    return cb(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  exposedHeaders: ["Set-Cookie"],
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());

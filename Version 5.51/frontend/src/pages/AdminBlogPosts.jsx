@@ -297,8 +297,7 @@ function PostEditor({ post, onSaved, onClose }) {
 
   useEffect(() => {
     if (post?.id) {
-      fetch(apiUrl(`/api/blog/posts/${post.id}`), { credentials: "include" })
-        .then((r) => r.json())
+      apiFetch(`/api/blog/posts/${post.id}`)
         .then((data) => { setSections(data.sections || []); setThumbnailUrl(data.thumbnail_url || null); })
         .catch(() => {});
     }

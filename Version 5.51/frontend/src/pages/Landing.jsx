@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion, useMotionValue, animate, useInView, useReducedMotion } from "framer-motion";
 import AppShell from "../components/AppShell.jsx";
 import { usePWAInstall } from "../lib/usePWAInstall.js";
+import { apiUrl } from "../lib/api.js";
 
 function formatDate(ts) {
   if (!ts) return "";
@@ -15,7 +16,7 @@ function BlogPreview() {
   const [, navigate] = useLocation();
 
   useEffect(() => {
-    fetch("/neet-api/posts")
+    fetch(apiUrl("/neet-api/posts"))
       .then((r) => r.json())
       .then((data) => { setPosts(Array.isArray(data) ? data.slice(0, 3) : []); setLoading(false); })
       .catch(() => setLoading(false));

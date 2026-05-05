@@ -319,7 +319,7 @@ export default function NeetResourceDetails({ postId, onBack }) {
     document.documentElement.scrollTop = 0;
     document.body.scrollTop = 0;
     setLoading(true);
-    fetch(`/neet-api/posts/${postId}`)
+    fetch(apiUrl(`/neet-api/posts/${postId}`))
       .then((r) => r.json())
       .then((data) => { setPost(normalizePost(data)); setLoading(false); })
       .catch(() => setLoading(false));
@@ -329,7 +329,7 @@ export default function NeetResourceDetails({ postId, onBack }) {
     if (!postId) return;
     const key = `vp_${postId}`;
     if (localStorage.getItem(key)) return;
-    fetch(`/neet-api/posts/${postId}/view`, { method: "POST" })
+    fetch(apiUrl(`/neet-api/posts/${postId}/view`), { method: "POST" })
       .then(() => localStorage.setItem(key, "1"))
       .catch(() => {});
   }, [postId]);

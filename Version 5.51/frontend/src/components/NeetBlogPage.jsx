@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import "../styles/BlogPage.css";
 import { apiUrl } from "../lib/api.js";
 
+
 const POSTS_PER_PAGE = 10;
 
 const IconEye = () => (
@@ -43,7 +44,7 @@ export default function NeetBlogPage({ onPostSelect, scrollToPostId }) {
   }, [scrollToPostId]);
 
   useEffect(() => {
-    fetch("/neet-api/posts")
+    fetch(apiUrl("/neet-api/posts"))
       .then((r) => r.json())
       .then((data) => {
         const raw = Array.isArray(data) ? data : (data.posts || []);

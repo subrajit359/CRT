@@ -4,9 +4,10 @@ import { LayoutDashboard, Pencil } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
 import { useAuth } from "../lib/auth.jsx";
 import { useToast } from "../components/Toast.jsx";
+import { apiUrl } from "../lib/api.js";
 import "../styles/ResourceAdmin.css";
 
-const API = "/neet-api";
+const API = apiUrl("/neet-api");
 const BADGE_PRESETS = ["General", "1st Year", "2nd Year", "3rd Year", "4th Year", "NEET"];
 
 export default function NeetResourceAdmin() {
