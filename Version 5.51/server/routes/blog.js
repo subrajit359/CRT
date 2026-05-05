@@ -1,8 +1,9 @@
 import { Router } from "express";
 import multer from "multer";
 import { query } from "../db.js";
-import { requireAuth } from "../auth-middleware.js";
+import { requireAuth, getUserFromRequest } from "../auth-middleware.js";
 import { uploadBuffer, destroyAsset, isConfigured as cloudinaryReady } from "../cloudinary.js";
+import { cacheGet, cacheSet, cacheInvalidate } from "../cache.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -11,7 +12,8 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 
 async function loadPostWithSections(postId) {
   const { rows: posts } = await query(
-    `SELECT p.*, u.username AS author
+    `SELECT p.id, p.title, p.excerpt, p.thumbnail_url, p.thumbnail_key, p.read_time, p.views,
+            p.tags, p.published, p.created_at, p.updated_at, p.created_by, u.username AS author
        FROM blog_posts p LEFT JOIN users u ON u.id = p.created_by
       WHERE p.id = $1`,
     [postId]
@@ -19,12 +21,14 @@ async function loadPostWithSections(postId) {
   if (!posts[0]) return null;
   const post = posts[0];
   const { rows: sections } = await query(
-    `SELECT * FROM blog_post_sections WHERE post_id = $1 ORDER BY position ASC, created_at ASC`,
+    `SELECT id, post_id, title, image_url, position, created_at
+       FROM blog_post_sections WHERE post_id = $1 ORDER BY position ASC, created_at ASC`,
     [postId]
   );
   for (const sec of sections) {
     const { rows: items } = await query(
-      `SELECT * FROM blog_section_items WHERE section_id = $1 ORDER BY position ASC, created_at ASC`,
+      `SELECT id, section_id, label, drive_url, position, created_at
+         FROM blog_section_items WHERE section_id = $1 ORDER BY position ASC, created_at ASC`,
       [sec.id]
     );
     sec.items = items;
@@ -35,13 +39,16 @@ async function loadPostWithSections(postId) {
 
 // ── Public / authenticated reads ─────────────────────────────────────────────
 
-// GET /api/blog/posts   — list (paginated, searchable)
-router.get("/posts", requireAuth(), async (req, res) => {
+// GET /api/blog/posts   — list (paginated, searchable) — public for published posts
+router.get("/posts", async (req, res) => {
+  const user = await getUserFromRequest(req).catch(() => null);
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
   const q = (req.query.q || "").trim();
   const tag = (req.query.tag || "").trim();
-  const isManager = req.user && ["admin", "doctor"].includes(req.user.role);
+  const isManager = user && ["admin", "doctor"].includes(user.role);
+  const _bpKey = !q ? `blog:posts:${isManager ? 1 : 0}:${tag}:${page}:${limit}` : null;
+  if (_bpKey) { const _c = cacheGet(_bpKey); if (_c !== undefined) return res.json(_c); }
 
   const conditions = [];
   const params = [];
@@ -79,20 +86,28 @@ router.get("/posts", requireAuth(), async (req, res) => {
   );
   const total = countRows[0]?.total || 0;
 
-  res.json({ posts, total, page, limit, pages: Math.max(1, Math.ceil(total / limit)) });
+  const _bpResult = { posts, total, page, limit, pages: Math.max(1, Math.ceil(total / limit)) };
+  if (_bpKey) cacheSet(_bpKey, _bpResult, isManager ? 60_000 : 120_000);
+  res.json(_bpResult);
 });
 
-// GET /api/blog/posts/:id
-router.get("/posts/:id", requireAuth(), async (req, res) => {
+// GET /api/blog/posts/:id — public for published posts
+router.get("/posts/:id", async (req, res) => {
+  const user = await getUserFromRequest(req).catch(() => null);
+  const isManager = user && ["admin", "doctor"].includes(user.role);
+  if (!isManager) {
+    const _c = cacheGet(`blog:post:${req.params.id}`);
+    if (_c !== undefined) return res.json(_c);
+  }
   const post = await loadPostWithSections(req.params.id);
   if (!post) return res.status(404).json({ error: "Not found" });
-  const isManager = req.user && ["admin", "doctor"].includes(req.user.role);
   if (!post.published && !isManager) return res.status(404).json({ error: "Not found" });
+  if (!isManager && post.published) cacheSet(`blog:post:${req.params.id}`, post, 180_000);
   res.json(post);
 });
 
-// POST /api/blog/posts/:id/view — increment view counter (fire-and-forget)
-router.post("/posts/:id/view", requireAuth(), async (req, res) => {
+// POST /api/blog/posts/:id/view — increment view counter (public, fire-and-forget)
+router.post("/posts/:id/view", async (req, res) => {
   await query(`UPDATE blog_posts SET views = views + 1 WHERE id = $1`, [req.params.id]).catch(() => {});
   res.json({ ok: true });
 });
@@ -109,6 +124,7 @@ router.post("/posts", requireAuth(["admin", "doctor"]), async (req, res) => {
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
     [title.trim(), excerpt || null, read_time || "1 min read", tagsArr, !!published, req.user.id]
   );
+  cacheInvalidate("blog:posts:");
   res.json(rows[0]);
 });
 
@@ -134,6 +150,8 @@ router.patch("/posts/:id", requireAuth(["admin", "doctor"]), async (req, res) =>
     ]
   );
   if (!rows[0]) return res.status(404).json({ error: "Not found" });
+  cacheInvalidate("blog:posts:");
+  cacheInvalidate(`blog:post:${req.params.id}`);
   res.json(rows[0]);
 });
 
@@ -143,6 +161,8 @@ router.delete("/posts/:id", requireAuth(["admin"]), async (req, res) => {
   if (rows[0]?.thumbnail_key) {
     destroyAsset(rows[0].thumbnail_key).catch(() => {});
   }
+  cacheInvalidate("blog:posts:");
+  cacheInvalidate(`blog:post:${req.params.id}`);
   res.json({ ok: true });
 });
 
@@ -184,11 +204,12 @@ router.post("/posts/:postId/sections", requireAuth(["admin", "doctor"]), async (
     `INSERT INTO blog_post_sections (post_id, title, image_url, position) VALUES ($1,$2,$3,$4) RETURNING *`,
     [req.params.postId, title.trim(), image_url || null, pos]
   );
+  cacheInvalidate(`blog:post:${req.params.postId}`);
   rows[0].items = [];
   res.json(rows[0]);
 });
 
-// PATCH /api/blog/sections/:id
+// PATCH /api/blog/sections/:sectionId
 router.patch("/sections/:id", requireAuth(["admin", "doctor"]), async (req, res) => {
   const { title, image_url, position } = req.body;
   const { rows } = await query(
@@ -201,16 +222,19 @@ router.patch("/sections/:id", requireAuth(["admin", "doctor"]), async (req, res)
   );
   if (!rows[0]) return res.status(404).json({ error: "Not found" });
   const { rows: items } = await query(
-    `SELECT * FROM blog_section_items WHERE section_id = $1 ORDER BY position ASC`,
+    `SELECT id, section_id, label, drive_url, position, created_at
+       FROM blog_section_items WHERE section_id = $1 ORDER BY position ASC`,
     [rows[0].id]
   );
   rows[0].items = items;
+  cacheInvalidate(`blog:post:${rows[0].post_id}`);
   res.json(rows[0]);
 });
 
 // DELETE /api/blog/sections/:id
 router.delete("/sections/:id", requireAuth(["admin", "doctor"]), async (req, res) => {
-  await query(`DELETE FROM blog_post_sections WHERE id = $1`, [req.params.id]);
+  const { rows } = await query(`DELETE FROM blog_post_sections WHERE id = $1 RETURNING post_id`, [req.params.id]);
+  if (rows[0]) cacheInvalidate(`blog:post:${rows[0].post_id}`);
   res.json({ ok: true });
 });
 
@@ -229,6 +253,8 @@ router.post("/sections/:sectionId/items", requireAuth(["admin", "doctor"]), asyn
     `INSERT INTO blog_section_items (section_id, label, drive_url, position) VALUES ($1,$2,$3,$4) RETURNING *`,
     [req.params.sectionId, label.trim(), drive_url || null, pos]
   );
+  const { rows: sec } = await query(`SELECT post_id FROM blog_post_sections WHERE id=$1`, [req.params.sectionId]);
+  if (sec[0]) cacheInvalidate(`blog:post:${sec[0].post_id}`);
   res.json(rows[0]);
 });
 
@@ -244,12 +270,19 @@ router.patch("/items/:id", requireAuth(["admin", "doctor"]), async (req, res) =>
     [label?.trim() || null, drive_url !== undefined ? drive_url : null, position !== undefined ? position : null, req.params.id]
   );
   if (!rows[0]) return res.status(404).json({ error: "Not found" });
+  const { rows: sec } = await query(`SELECT post_id FROM blog_post_sections WHERE id=$1`, [rows[0].section_id]);
+  if (sec[0]) cacheInvalidate(`blog:post:${sec[0].post_id}`);
   res.json(rows[0]);
 });
 
 // DELETE /api/blog/items/:id
 router.delete("/items/:id", requireAuth(["admin", "doctor"]), async (req, res) => {
+  const { rows: item } = await query(
+    `SELECT s.post_id FROM blog_section_items i JOIN blog_post_sections s ON s.id = i.section_id WHERE i.id=$1`,
+    [req.params.id]
+  );
   await query(`DELETE FROM blog_section_items WHERE id = $1`, [req.params.id]);
+  if (item[0]) cacheInvalidate(`blog:post:${item[0].post_id}`);
   res.json({ ok: true });
 });
 

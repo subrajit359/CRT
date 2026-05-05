@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { LayoutDashboard, Pencil } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
 import { useAuth } from "../lib/auth.jsx";
+import { useToast } from "../components/Toast.jsx";
 import "../styles/ResourceAdmin.css";
 
 const API = "/neet-api";
@@ -18,19 +19,15 @@ export default function NeetResourceAdmin() {
   const [customBadge, setCustomBadge] = useState("");
   const [sections, setSections] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingEdit, setLoadingEdit] = useState(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [toast, setToast] = useState(null);
+  const toast = useToast();
   const thumbRef = useRef();
 
   useEffect(() => { loadDashboard(); }, []);
-
-  const showToast = (msg, type = "success") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  };
 
   const loadDashboard = async () => {
     setLoading(true);
@@ -39,31 +36,38 @@ export default function NeetResourceAdmin() {
       setPosts(await pr.json());
       setStats(await sr.json());
     } catch {
-      showToast("Failed to load data", "error");
+      toast.error("Failed to load data");
     } finally {
       setLoading(false);
     }
   };
 
   const loadPostForEdit = async (post) => {
-    setLoading(true);
+    setLoadingEdit(post.id);
     try {
       const res = await fetch(`${API}/posts/${post.id}`);
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const data = await res.json();
+      if (data.error) throw new Error(data.error);
       setEditingPost(data);
       const isCustom = data.badge && !BADGE_PRESETS.includes(data.badge);
+      const rawDate = data.date || "";
+      const dateVal = rawDate.includes("T") ? rawDate.slice(0, 10) : rawDate;
       setPostForm({
         title: data.title || "",
         description: data.description || "",
         badge: isCustom ? "Custom" : (data.badge || "General"),
         thumbnail_url: data.thumbnail_url || "",
         keywords: data.keywords || "",
+        date: dateVal,
       });
       setCustomBadge(isCustom ? data.badge : "");
       setSections(data.sections || []);
       setView("editPost");
+    } catch (err) {
+      toast.error(`Failed to load post: ${err.message}`);
     } finally {
-      setLoading(false);
+      setLoadingEdit(null);
     }
   };
 
@@ -86,7 +90,7 @@ export default function NeetResourceAdmin() {
 
   const startNewPost = () => {
     setEditingPost(null);
-    setPostForm({ title: "", description: "", badge: "General", thumbnail_url: "", keywords: "" });
+    setPostForm({ title: "", description: "", badge: "General", thumbnail_url: "", keywords: "", date: "" });
     setCustomBadge("");
     setSections([]);
     setView("editPost");
@@ -108,7 +112,7 @@ export default function NeetResourceAdmin() {
       if (error) throw new Error(error);
       return url;
     } catch {
-      showToast("Image upload failed", "error");
+      toast.error("Image upload failed");
       return null;
     } finally {
       setUploading((u) => ({ ...u, [key]: false }));
@@ -116,8 +120,8 @@ export default function NeetResourceAdmin() {
   };
 
   const handleSavePost = async () => {
-    if (!postForm.title.trim()) { showToast("Title is required", "error"); return; }
-    if (postForm.badge === "Custom" && !customBadge.trim()) { showToast("Please enter a custom category name", "error"); return; }
+    if (!postForm.title.trim()) { toast.error("Title is required"); return; }
+    if (postForm.badge === "Custom" && !customBadge.trim()) { toast.error("Please enter a custom category name"); return; }
     setSaving(true);
     try {
       const method = editingPost ? "PUT" : "POST";
@@ -129,8 +133,8 @@ export default function NeetResourceAdmin() {
         body: JSON.stringify({ ...postForm, badge: finalBadge }),
       });
       const saved = await res.json();
-      if (!editingPost) setEditingPost(saved);
-      showToast(editingPost ? "Post updated!" : "Post created! Now add sections below.");
+      setEditingPost(saved);
+      toast.success(editingPost ? "Post updated!" : "Post created! Now add sections below.");
       await loadDashboard();
     } finally {
       setSaving(false);
@@ -140,12 +144,12 @@ export default function NeetResourceAdmin() {
   const handleDeletePost = async (id) => {
     if (!window.confirm("Delete this post and all its content?")) return;
     await fetch(`${API}/posts/${id}`, { method: "DELETE" });
-    showToast("Post deleted");
+    toast.success("Post deleted");
     await loadDashboard();
   };
 
   const handleAddSection = async () => {
-    if (!editingPost) { showToast("Save the post first before adding sections", "error"); return; }
+    if (!editingPost) { toast.error("Save the post first before adding sections"); return; }
     const res = await fetch(`${API}/sections`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -202,12 +206,12 @@ export default function NeetResourceAdmin() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(resource),
     });
-    showToast("Resource saved");
+    toast.success("Resource saved");
   };
 
   const handleSaveSection = async (section) => {
     await handleUpdateSection(section.id, { title: section.title, image_url: section.image_url, order_index: section.order_index });
-    showToast("Section saved");
+    toast.success("Section saved");
   };
 
   const filtered = posts.filter((p) => p.title?.toLowerCase().includes(search.toLowerCase()));
@@ -218,12 +222,6 @@ export default function NeetResourceAdmin() {
     <AppShell>
       <div style={{ margin: "-24px -16px", minHeight: "calc(100vh - 60px)" }}>
         <div className="ra-layout">
-          {toast && (
-            <div className={`ra-toast${toast.type === "error" ? " ra-toast-error" : ""}`}>
-              {toast.msg}
-            </div>
-          )}
-
           {sidebarOpen && <div className="ra-overlay" onClick={() => setSidebarOpen(false)} />}
 
           <aside className={"ra-sidebar" + (sidebarOpen ? " ra-sidebar-open" : "")}>
@@ -308,7 +306,13 @@ export default function NeetResourceAdmin() {
                               <td className="ra-td-light">{post.date || "—"}</td>
                               <td className="ra-td-light">{(post.views || 0).toLocaleString()}</td>
                               <td>
-                                <button className="ra-action-btn" onClick={() => loadPostForEdit(post)}>Edit</button>
+                                <button
+                                  className="ra-action-btn"
+                                  onClick={() => loadPostForEdit(post)}
+                                  disabled={loadingEdit === post.id}
+                                >
+                                  {loadingEdit === post.id ? "Opening..." : "Edit"}
+                                </button>
                                 <button className="ra-action-btn ra-action-del" onClick={() => handleDeletePost(post.id)}>Delete</button>
                               </td>
                             </tr>
@@ -365,26 +369,36 @@ export default function NeetResourceAdmin() {
                           {postForm.description && extractKeywords(postForm.description).length === 0 && <span className="ra-kw-empty">No keywords found</span>}
                         </div>
                       </div>
-                      <div className="ra-field">
-                        <label>Badge / Category</label>
-                        <select
-                          value={postForm.badge}
-                          onChange={(e) => {
-                            setPostForm((f) => ({ ...f, badge: e.target.value }));
-                            if (e.target.value !== "Custom") setCustomBadge("");
-                          }}
-                        >
-                          {BADGE_PRESETS.map((b) => <option key={b}>{b}</option>)}
-                          <option value="Custom">Custom...</option>
-                        </select>
-                        {postForm.badge === "Custom" && (
+                      <div className="ra-field-row">
+                        <div className="ra-field" style={{ marginBottom: 0 }}>
+                          <label>Badge / Category</label>
+                          <select
+                            value={postForm.badge}
+                            onChange={(e) => {
+                              setPostForm((f) => ({ ...f, badge: e.target.value }));
+                              if (e.target.value !== "Custom") setCustomBadge("");
+                            }}
+                          >
+                            {BADGE_PRESETS.map((b) => <option key={b}>{b}</option>)}
+                            <option value="Custom">Custom...</option>
+                          </select>
+                          {postForm.badge === "Custom" && (
+                            <input
+                              style={{ marginTop: 8 }}
+                              placeholder="Type custom category name..."
+                              value={customBadge}
+                              onChange={(e) => setCustomBadge(e.target.value)}
+                            />
+                          )}
+                        </div>
+                        <div className="ra-field" style={{ marginBottom: 0 }}>
+                          <label>Publish Date</label>
                           <input
-                            style={{ marginTop: 8 }}
-                            placeholder="Type custom category name..."
-                            value={customBadge}
-                            onChange={(e) => setCustomBadge(e.target.value)}
+                            type="date"
+                            value={postForm.date || ""}
+                            onChange={(e) => setPostForm((f) => ({ ...f, date: e.target.value }))}
                           />
-                        )}
+                        </div>
                       </div>
                       <div className="ra-field">
                         <label>Thumbnail Image</label>
@@ -440,7 +454,7 @@ export default function NeetResourceAdmin() {
                             </div>
 
                             <div className="ra-field" style={{ marginBottom: 10 }}>
-                              <label>Section Image</label>
+                              <label>Section Image (Cloudinary)</label>
                               <div className="ra-upload-area small" onClick={() => document.getElementById(`sec-img-${section.id}`)?.click()}>
                                 {uploading[`sec-${section.id}`] ? "Uploading..." : section.image_url
                                   ? <div className="ra-thumb-preview small"><img src={section.image_url} alt="" /><span className="ra-thumb-change">Change</span></div>
@@ -503,28 +517,31 @@ export default function NeetResourceAdmin() {
                   <div className="ra-create-right">
                     <div className="ra-form-box">
                       <h2 className="ra-form-section-title">Publish</h2>
+                      {editingPost && (
+                        <p className="ra-publish-sub">Editing post #{editingPost.id}</p>
+                      )}
                       <button className="ra-btn-publish" onClick={handleSavePost} disabled={saving}>
-                        {saving ? "Saving..." : editingPost ? "Update Post" : "Create Post"}
+                        {saving ? "Saving..." : editingPost ? "Save Changes" : "Create Post"}
                       </button>
-                      <button className="ra-btn-draft" onClick={() => handleNav("dashboard")}>
-                        Cancel
-                      </button>
+                      <Link href="/study" className="ra-btn-draft">
+                        Preview Post
+                      </Link>
                     </div>
 
                     <div className="ra-form-box">
-                      <h2 className="ra-form-section-title">Stats</h2>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                      <h2 className="ra-form-section-title">Quick Stats</h2>
+                      <div>
                         <div className="ra-quick-stat">
-                          <span>Total Posts</span>
-                          <strong>{stats.totalPosts}</strong>
+                          <span>Sections</span>
+                          <strong>{sections.length}</strong>
                         </div>
                         <div className="ra-quick-stat">
-                          <span>Total Resources</span>
-                          <strong>{stats.totalResources}</strong>
+                          <span>Resources</span>
+                          <strong>{sections.reduce((t, s) => t + (s.resources?.length || 0), 0)}</strong>
                         </div>
                         <div className="ra-quick-stat">
-                          <span>Total Views</span>
-                          <strong>{stats.totalViews?.toLocaleString()}</strong>
+                          <span>Views</span>
+                          <strong>{(editingPost?.views || 0).toLocaleString()}</strong>
                         </div>
                       </div>
                     </div>

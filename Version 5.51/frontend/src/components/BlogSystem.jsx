@@ -515,17 +515,27 @@ function PostDetail({ post, onBack }) {
 // ─── Pagination ───────────────────────────────────────────────────────────────
 function Pagination({ current, total, onChange }) {
   if (total <= 1) return null;
+
+  function getPages() {
+    if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+    const pages = [];
+    pages.push(1);
+    if (current > 3) pages.push("…");
+    for (let p = Math.max(2, current - 1); p <= Math.min(total - 1, current + 1); p++) pages.push(p);
+    if (current < total - 2) pages.push("…");
+    pages.push(total);
+    return pages;
+  }
+
   return (
     <div style={s.pagination}>
-      {current > 1 && (
-        <button style={s.pageBtn} onClick={() => onChange(current - 1)}>« Prev</button>
+      <button style={s.pageBtn} onClick={() => onChange(current - 1)} disabled={current === 1}>« Prev</button>
+      {getPages().map((p, i) =>
+        p === "…"
+          ? <span key={`ellipsis-${i}`} style={{ padding: "7px 4px", color: "#888", fontSize: 14 }}>…</span>
+          : <button key={p} style={p === current ? s.pageBtnActive : s.pageBtn} onClick={() => onChange(p)}>{p}</button>
       )}
-      {Array.from({ length: total }, (_, i) => i + 1).map((p) => (
-        <button key={p} style={p === current ? s.pageBtnActive : s.pageBtn} onClick={() => onChange(p)}>{p}</button>
-      ))}
-      {current < total && (
-        <button style={s.pageBtn} onClick={() => onChange(current + 1)}>Next »</button>
-      )}
+      <button style={s.pageBtn} onClick={() => onChange(current + 1)} disabled={current === total}>Next »</button>
     </div>
   );
 }

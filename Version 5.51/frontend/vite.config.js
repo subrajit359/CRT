@@ -67,6 +67,16 @@ export default defineConfig({
           });
         },
       },
+      "/neet-api": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq) => {
+            proxyReq.removeHeader("origin");
+            proxyReq.removeHeader("referer");
+          });
+        },
+      },
     },
   },
 });

@@ -3,6 +3,7 @@ import { query } from "../db.js";
 import { requireAuth } from "../auth-middleware.js";
 import { notify } from "../notify.js";
 import { caseOpenai, groqFallbackOpenai, loadPrompt } from "../openai.js";
+import { cacheInvalidate } from "../cache.js";
 import { isMailerConfigured, sendMail } from "../mailer.js";
 import { sendPushBroadcast } from "../push.js";
 import {
@@ -371,6 +372,7 @@ router.delete("/cases/:id", requireAuth(["admin"]), async (req, res) => {
   );
   if (!rows[0]) return res.status(404).json({ error: "Case not found" });
   await query(`UPDATE cases SET deleted_at=NOW() WHERE id=$1`, [rows[0].id]);
+  cacheInvalidate("cases:");
   if (rows[0].uploader_id && rows[0].uploader_id !== req.user.id) {
     try {
       await notify(
@@ -381,7 +383,6 @@ router.delete("/cases/:id", requireAuth(["admin"]), async (req, res) => {
         `/admin`
       );
     } catch (e) {
-      // Notification is best-effort; surface to logs but don't fail the delete.
       console.warn("notify on admin case delete failed:", e?.message || e);
     }
   }
@@ -401,6 +402,7 @@ router.patch("/delete-requests/:id", requireAuth(["admin"]), async (req, res) =>
   );
   if (decision === "approved") {
     await query(`UPDATE cases SET deleted_at=NOW() WHERE id=$1`, [rows[0].case_id]);
+    cacheInvalidate("cases:");
   }
   const titles = {
     approved: "Your delete request was approved",

@@ -4,6 +4,7 @@ import { query } from "../db.js";
 import { requireAuth } from "../auth-middleware.js";
 import { notify } from "../notify.js";
 import { uploadBuffer, destroyAsset, isConfigured as cloudinaryReady } from "../cloudinary.js";
+import { cacheGet, cacheSet, cacheInvalidate } from "../cache.js";
 
 const router = express.Router();
 
@@ -38,8 +39,12 @@ router.get("/specialties", (req, res) => res.json({ specialties: SPECIALTIES }))
 // Total number of (non-deleted) cases — visible to all signed-in users so we
 // can show "Total cases available" stat cards on student/doctor dashboards.
 router.get("/count", requireAuth(), async (_req, res) => {
+  const cached = cacheGet("cases:count");
+  if (cached !== undefined) return res.json(cached);
   const { rows } = await query(`SELECT COUNT(*)::int AS total FROM cases WHERE deleted_at IS NULL`);
-  res.json({ total: rows[0]?.total || 0 });
+  const result = { total: rows[0]?.total || 0 };
+  cacheSet("cases:count", result, 60_000);
+  res.json(result);
 });
 
 // ---------- Bulk upload ----------
@@ -214,25 +219,45 @@ router.post("/bulk", requireAuth(["doctor", "admin"]), bulkUpload.any(), async (
 
 router.get("/", requireAuth(), async (req, res) => {
   const { specialty, level, q } = req.query;
+
+  const cacheKey = `cases:list:${specialty || ""}:${level || ""}:${q || ""}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return res.json(cached);
+
   const params = [];
   let where = "c.deleted_at IS NULL";
-  // Match against the multi-specialty array so a case tagged with several
-  // specialties shows up under each one.
   if (specialty) { params.push(specialty); where += ` AND $${params.length} = ANY(c.specialties)`; }
   if (level) { params.push(parseInt(level, 10)); where += ` AND c.level=$${params.length}`; }
-  if (q) { params.push(`%${q}%`); where += ` AND (c.title ILIKE $${params.length} OR c.body ILIKE $${params.length})`; }
+  if (q) {
+    params.push(q);
+    where += ` AND (c.title ILIKE $${params.length} OR to_tsvector('english', c.title || ' ' || c.body) @@ plainto_tsquery('english', $${params.length}))`;
+  }
+
   const { rows } = await query(
     `SELECT c.id, c.title, c.specialty, c.specialties, c.level, c.source, c.source_kind, c.created_at,
             u.username AS uploader_username, u.full_name AS uploader_name,
-            (SELECT COUNT(*)::int FROM case_verifications WHERE case_id=c.id AND action='verify') AS verify_count,
-            (SELECT COUNT(*)::int FROM case_verifications WHERE case_id=c.id AND action='unverify') AS unverify_count,
-            (SELECT COUNT(*)::int FROM thumbs_up WHERE case_id=c.id) AS thumbs_count
-       FROM cases c LEFT JOIN users u ON u.id=c.uploader_id
+            COALESCE(cv_v.n, 0) AS verify_count,
+            COALESCE(cv_u.n, 0) AS unverify_count,
+            COALESCE(th.n, 0)   AS thumbs_count
+       FROM cases c
+       LEFT JOIN users u ON u.id = c.uploader_id
+       LEFT JOIN (
+         SELECT case_id, COUNT(*)::int AS n FROM case_verifications WHERE action='verify' GROUP BY case_id
+       ) cv_v ON cv_v.case_id = c.id
+       LEFT JOIN (
+         SELECT case_id, COUNT(*)::int AS n FROM case_verifications WHERE action='unverify' GROUP BY case_id
+       ) cv_u ON cv_u.case_id = c.id
+       LEFT JOIN (
+         SELECT case_id, COUNT(*)::int AS n FROM thumbs_up GROUP BY case_id
+       ) th ON th.case_id = c.id
        WHERE ${where}
        ORDER BY c.created_at DESC LIMIT 100`,
     params
   );
-  res.json({ cases: rows });
+
+  const result = { cases: rows };
+  cacheSet(cacheKey, result, 45_000);
+  res.json(result);
 });
 
 // Groups view: chunk this specialty+level into groups of 5 cases (sequential),
@@ -248,6 +273,11 @@ router.get("/groups", requireAuth(), async (req, res) => {
   if (!specialty) {
     return res.status(400).json({ error: "specialty is required" });
   }
+
+  const _grpKey = `cases:groups:${req.user.id}:${specialty}:${level ?? "any"}`;
+  const _grpCached = cacheGet(_grpKey);
+  if (_grpCached) return res.json(_grpCached);
+
   // When `level` is omitted (or "any"), include cases at all levels for the specialty.
   const params = [specialty, req.user.id];
   let levelFilter = "";
@@ -281,14 +311,16 @@ router.get("/groups", requireAuth(), async (req, res) => {
   }
   // Suggested group = first group that is not yet fully completed.
   const activeIdx = groups.findIndex((g) => !g.completed);
-  res.json({
+  const _grpResult = {
     specialty,
     level,
     groupSize: GROUP_SIZE,
     totalCases: cases.length,
     suggestedGroup: activeIdx >= 0 ? groups[activeIdx].index : null,
     groups,
-  });
+  };
+  cacheSet(_grpKey, _grpResult, 30_000);
+  res.json(_grpResult);
 });
 
 router.get("/random", requireAuth(), async (req, res) => {
@@ -438,6 +470,7 @@ router.post("/", requireAuth(["doctor", "admin"]), async (req, res) => {
       `INSERT INTO discussions (case_id, kind) VALUES ($1,'doctor') ON CONFLICT DO NOTHING`,
       [rows[0].id]
     );
+    cacheInvalidate("cases:");
     res.json({ ok: true, id: rows[0].id });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -488,6 +521,7 @@ router.patch("/:id", requireAuth(["doctor", "admin"]), async (req, res) => {
     if (!fields.length) return res.json({ ok: true });
     params.push(req.params.id);
     await query(`UPDATE cases SET ${fields.join(", ")}, updated_at=NOW() WHERE id=$${params.length}`, params);
+    cacheInvalidate("cases:");
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -499,6 +533,7 @@ router.post("/:id/thumbs-up", requireAuth(), async (req, res) => {
     `INSERT INTO thumbs_up (user_id, case_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
     [req.user.id, req.params.id]
   );
+  cacheInvalidate("cases:list:");
   res.json({ ok: true });
 });
 

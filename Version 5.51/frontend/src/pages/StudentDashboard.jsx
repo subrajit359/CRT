@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { CheckCircle2, Sparkles, Compass } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
-import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
+import { useApiQuery, prefetchApiQuery } from "../lib/query.js";
 import Sparkline from "../components/Sparkline.jsx";
 import Counter from "../components/Counter.jsx";
 import RadialProgress from "../components/RadialProgress.jsx";
@@ -46,49 +46,30 @@ function deltaText(d) {
 export default function StudentDashboard() {
   const { user } = useAuth();
   const [, navigate] = useLocation();
-  const [stats, setStats] = useState(null);
-  const [next, setNext] = useState(null);
-  const [changes, setChanges] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [milestone, setMilestone] = useState(null);
+  const { data: stats, isPending: statsPending } = useApiQuery("/api/eval/stats");
+  const { data: next } = useApiQuery("/api/eval/next");
+  const { data: changes } = useApiQuery("/api/eval/changes");
+  const { data: rankInfo } = useApiQuery("/api/leaderboard?period=all&page=1&pageSize=1");
+  const { data: tcData } = useApiQuery("/api/cases/count");
+  const { data: xpInfo } = useApiQuery("/api/achievements");
 
-  const [rankInfo, setRankInfo] = useState(null);
-  const [totalCases, setTotalCases] = useState(null);
-  const [xpInfo, setXpInfo] = useState(null);
+  const totalCases = tcData?.total ?? 0;
+  const loading = statsPending && !stats;
+
+  const [milestone, setMilestone] = useState(null);
+  useEffect(() => {
+    if (!stats) return;
+    const cur = Number(stats?.streak || 0);
+    let prev = 0;
+    try { prev = Number(localStorage.getItem(STREAK_KEY) || 0); } catch {}
+    if (cur > prev && STREAK_MILESTONES.includes(cur)) {
+      setMilestone({ n: cur, key: Date.now() });
+    }
+    try { localStorage.setItem(STREAK_KEY, String(cur)); } catch {}
+  }, [stats]);
 
   useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    const softFetch = (path, fallback) =>
-      api.get(path).catch((err) => {
-        console.warn(`[StudentDashboard] optional fetch failed: ${path}`, err);
-        return fallback;
-      });
-    Promise.all([
-      softFetch("/api/eval/stats", null),
-      softFetch("/api/eval/next", { case: null }),
-      softFetch("/api/eval/changes", { events: [] }),
-      softFetch("/api/leaderboard?period=all&page=1&pageSize=1", null),
-      softFetch("/api/cases/count", { total: 0 }),
-      softFetch("/api/achievements", null),
-    ]).then(([s, n, c, lb, tc, ach]) => {
-      if (!alive) return;
-      setStats(s);
-      setNext(n);
-      setChanges(c);
-      setRankInfo(lb);
-      setTotalCases(tc?.total ?? 0);
-      setXpInfo(ach);
-      setLoading(false);
-      const cur = Number(s?.streak || 0);
-      let prev = 0;
-      try { prev = Number(localStorage.getItem(STREAK_KEY) || 0); } catch {}
-      if (cur > prev && STREAK_MILESTONES.includes(cur)) {
-        setMilestone({ n: cur, key: Date.now() });
-      }
-      try { localStorage.setItem(STREAK_KEY, String(cur)); } catch {}
-    });
-    return () => { alive = false; };
+    prefetchApiQuery("/api/cases/specialties");
   }, []);
 
   const trendValues = useMemo(

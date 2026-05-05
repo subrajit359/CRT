@@ -3,6 +3,7 @@ import multer from "multer";
 import { query } from "../db.js";
 import { requireAuth } from "../auth-middleware.js";
 import { uploadBuffer, destroyAsset, isConfigured as cloudinaryReady } from "../cloudinary.js";
+import { cacheGet, cacheSet, cacheInvalidate } from "../cache.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -27,6 +28,9 @@ function resourceTypeFor(mime = "") {
 // List children of a category (or roots when no parent given).
 router.get("/categories", requireAuth(), async (req, res) => {
   const parent = (req.query.parent || "").toString();
+  const cacheKey = `study:cats:${parent || "root"}`;
+  const cached = cacheGet(cacheKey);
+  if (cached !== undefined) return res.json(cached);
   const params = [];
   let where = "parent_id IS NULL";
   if (parent) { params.push(parent); where = `parent_id = $1`; }
@@ -41,11 +45,16 @@ router.get("/categories", requireAuth(), async (req, res) => {
       ORDER BY c.position ASC, c.created_at DESC`,
     params
   );
-  res.json({ categories: rows });
+  const result = { categories: rows };
+  cacheSet(cacheKey, result, 120_000);
+  res.json(result);
 });
 
 // Breadcrumb (root → ... → this category)
 router.get("/categories/:id/path", requireAuth(), async (req, res) => {
+  const cacheKey = `study:path:${req.params.id}`;
+  const cached = cacheGet(cacheKey);
+  if (cached !== undefined) return res.json(cached);
   const { rows } = await query(
     `WITH RECURSIVE chain AS (
        SELECT id, name, parent_id, description, thumbnail_url, 0 AS depth FROM study_categories WHERE id = $1
@@ -56,7 +65,9 @@ router.get("/categories/:id/path", requireAuth(), async (req, res) => {
      SELECT id, name, description, thumbnail_url FROM chain ORDER BY depth DESC`,
     [req.params.id]
   );
-  res.json({ path: rows });
+  const result = { path: rows };
+  cacheSet(cacheKey, result, 300_000);
+  res.json(result);
 });
 
 router.post("/categories", requireAuth(["admin", "doctor"]), async (req, res) => {
@@ -69,6 +80,7 @@ router.post("/categories", requireAuth(["admin", "doctor"]), async (req, res) =>
       `INSERT INTO study_categories (name, parent_id, description, created_by) VALUES ($1,$2,$3,$4) RETURNING id`,
       [name, parentId, description, req.user.id]
     );
+    cacheInvalidate(`study:cats:${parentId || "root"}`);
     res.json({ ok: true, id: rows[0].id });
   } catch (e) {
     console.error("[study] create category failed", e);
@@ -86,6 +98,8 @@ router.patch("/categories/:id", requireAuth(["admin", "doctor"]), async (req, re
   if (!fields.length) return res.status(400).json({ error: "Nothing to update" });
   params.push(req.params.id);
   await query(`UPDATE study_categories SET ${fields.join(", ")} WHERE id=$${params.length}`, params);
+  cacheInvalidate("study:cats:");
+  cacheInvalidate(`study:path:${req.params.id}`);
   res.json({ ok: true });
 });
 
@@ -108,6 +122,8 @@ router.post("/categories/:id/thumbnail", requireAuth(["admin", "doctor"]), uploa
       `UPDATE study_categories SET thumbnail_url=$1, thumbnail_key=$2 WHERE id=$3`,
       [result.secure_url, result.public_id, req.params.id]
     );
+    cacheInvalidate("study:cats:");
+    cacheInvalidate(`study:path:${req.params.id}`);
     res.json({ ok: true, thumbnail_url: result.secure_url });
   } catch (e) {
     console.error("[study] thumbnail upload failed", e);
@@ -140,6 +156,9 @@ router.delete("/categories/:id", requireAuth(["admin"]), async (req, res) => {
     if (c.thumbnail_key) await destroyAsset(c.thumbnail_key, "image").catch(() => {});
   }
   await query(`DELETE FROM study_categories WHERE id=$1`, [req.params.id]);
+  cacheInvalidate("study:cats:");
+  cacheInvalidate("study:path:");
+  cacheInvalidate("study:res:");
   res.json({ ok: true });
 });
 
@@ -169,6 +188,9 @@ router.get("/search", requireAuth(), async (req, res) => {
 // ── Resources ──────────────────────────────────────────────────────────────
 
 router.get("/categories/:id/resources", requireAuth(), async (req, res) => {
+  const cacheKey = `study:res:${req.params.id}`;
+  const cached = cacheGet(cacheKey);
+  if (cached !== undefined) return res.json(cached);
   const { rows } = await query(
     `SELECT r.id, r.title, r.description, r.filename, r.mime_type, r.size_bytes,
             r.storage_url, r.kind, r.created_at,
@@ -178,7 +200,9 @@ router.get("/categories/:id/resources", requireAuth(), async (req, res) => {
       ORDER BY r.created_at DESC`,
     [req.params.id]
   );
-  res.json({ resources: rows });
+  const result = { resources: rows };
+  cacheSet(cacheKey, result, 120_000);
+  res.json(result);
 });
 
 router.post("/categories/:id/resources", requireAuth(["admin", "doctor"]), upload.single("file"), async (req, res) => {
@@ -209,6 +233,8 @@ router.post("/categories/:id/resources", requireAuth(["admin", "doctor"]), uploa
        RETURNING id`,
       [req.params.id, title, description, filename, mime_type, size_bytes, storage_url, storage_key, kind, req.user.id]
     );
+    cacheInvalidate(`study:res:${req.params.id}`);
+    cacheInvalidate(`study:cats:${req.params.id}`);
     res.json({ ok: true, id: rows[0].id });
   } catch (e) {
     console.error("[study] create resource failed", e);
@@ -225,17 +251,21 @@ router.patch("/resources/:id", requireAuth(["admin"]), async (req, res) => {
   if (!fields.length) return res.status(400).json({ error: "Nothing to update" });
   params.push(req.params.id);
   await query(`UPDATE study_resources SET ${fields.join(", ")} WHERE id=$${params.length}`, params);
+  cacheInvalidate("study:res:");
   res.json({ ok: true });
 });
 
 router.delete("/resources/:id", requireAuth(["admin"]), async (req, res) => {
-  const { rows } = await query(`SELECT storage_key FROM study_resources WHERE id=$1`, [req.params.id]);
+  const { rows } = await query(`SELECT storage_key, category_id FROM study_resources WHERE id=$1`, [req.params.id]);
   const r = rows[0];
   if (r?.storage_key) {
     const [resType, ...rest] = r.storage_key.split(":");
     await destroyAsset(rest.join(":"), resType).catch(() => {});
   }
   await query(`DELETE FROM study_resources WHERE id=$1`, [req.params.id]);
+  if (r?.category_id) cacheInvalidate(`study:res:${r.category_id}`);
+  else cacheInvalidate("study:res:");
+  cacheInvalidate("study:cats:");
   res.json({ ok: true });
 });
 

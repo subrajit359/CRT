@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import "../styles/BlogPage.css";
 import { apiUrl } from "../lib/api.js";
 
@@ -27,16 +27,35 @@ function formatDate(ts) {
   return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
 }
 
-export default function NeetBlogPage({ onPostSelect }) {
+export default function NeetBlogPage({ onPostSelect, scrollToPostId }) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const cardRefs = useRef({});
+
+  useLayoutEffect(() => {
+    if (!scrollToPostId) return;
+    const el = cardRefs.current[scrollToPostId];
+    if (el) {
+      el.scrollIntoView({ block: "center", behavior: "instant" });
+    }
+  }, [scrollToPostId]);
 
   useEffect(() => {
-    fetch(apiUrl("/neet-api/posts"))
+    fetch("/neet-api/posts")
       .then((r) => r.json())
-      .then((data) => { setPosts(Array.isArray(data) ? data : []); setLoading(false); })
+      .then((data) => {
+        const raw = Array.isArray(data) ? data : (data.posts || []);
+        const mapped = raw.map((p) => ({
+          ...p,
+          description: p.description || "",
+          badge: p.badge || "",
+          date: p.date || null,
+        }));
+        setPosts(mapped);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, []);
 
@@ -125,7 +144,12 @@ export default function NeetBlogPage({ onPostSelect }) {
         <>
           <div className="blog-grid">
             {paginated.map((post) => (
-              <div className="blog-card" key={post.id} onClick={() => onPostSelect(post.id)}>
+              <div
+                className="blog-card"
+                key={post.id}
+                ref={(el) => { if (el) cardRefs.current[post.id] = el; }}
+                onClick={() => onPostSelect(post.id)}
+              >
                 <div className="blog-card-thumb">
                   {post.thumbnail_url ? (
                     <img src={post.thumbnail_url} alt={post.title} />

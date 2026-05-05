@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X, Download, ExternalLink, FileText, ChevronLeft, ChevronRight } from "lucide-react";
 
 function classify(att) {
@@ -24,6 +25,12 @@ export default function AttachmentViewer({ items, index, onClose, onIndexChange 
   const cur = list[index];
 
   useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  useEffect(() => {
     function onKey(e) {
       if (e.key === "Escape") onClose?.();
       if (e.key === "ArrowLeft" && index > 0) onIndexChange?.(index - 1);
@@ -37,7 +44,7 @@ export default function AttachmentViewer({ items, index, onClose, onIndexChange 
   const kind = classify(cur);
   const url = cur.storage_url;
 
-  return (
+  return createPortal(
     <div className="av-overlay" onClick={onClose}>
 
       {/* ── Header ── */}
@@ -151,6 +158,7 @@ export default function AttachmentViewer({ items, index, onClose, onIndexChange 
           {index + 1} / {list.length}
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }

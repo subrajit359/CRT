@@ -2,6 +2,7 @@ import express from "express";
 import { query } from "../db.js";
 import { requireAuth } from "../auth-middleware.js";
 import { assistantOpenai, coachOpenai } from "../openai.js";
+import { cacheGet, cacheSet, cacheInvalidate } from "../cache.js";
 
 const router = express.Router();
 
@@ -60,6 +61,9 @@ router.get("/", requireAuth(), async (req, res) => {
   if (req.user.role !== "student") return res.status(403).json({ error: "Students only" });
   try {
     const uid = req.user.id;
+    const _ck = `insights:${uid}`;
+    const _cc = cacheGet(_ck);
+    if (_cc !== undefined) return res.json(_cc);
 
     const [
       { rows: allResp },
@@ -156,7 +160,9 @@ router.get("/", requireAuth(), async (req, res) => {
       }
     }
 
-    res.json({ totalCases, overallAvg, streak, xp, specialties, trend, heatmap, weakest, strongest, tips });
+    const _insightResult = { totalCases, overallAvg, streak, xp, specialties, trend, heatmap, weakest, strongest, tips };
+    cacheSet(_ck, _insightResult, 60_000);
+    res.json(_insightResult);
   } catch (e) {
     console.error("[insights] GET /", e);
     res.status(500).json({ error: e.message });
@@ -168,6 +174,7 @@ router.post("/refresh-tips", requireAuth(), async (req, res) => {
   if (req.user.role !== "student") return res.status(403).json({ error: "Students only" });
   try {
     await query(`DELETE FROM insight_cache WHERE user_id=$1`, [req.user.id]);
+    cacheInvalidate(`insights:${req.user.id}`);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });

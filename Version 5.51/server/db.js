@@ -16,7 +16,9 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 10,
+  max: 20,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 5_000,
 });
 
 export async function query(text, params) {
@@ -110,6 +112,7 @@ export async function initDb() {
     created_at TIMESTAMPTZ DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL
   )`);
+  await query(`CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id, expires_at DESC)`);
 
   await query(`CREATE TABLE IF NOT EXISTS cases (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -128,6 +131,9 @@ export async function initDb() {
 
   await query(`CREATE INDEX IF NOT EXISTS cases_specialty_idx ON cases (specialty)`);
   await query(`CREATE INDEX IF NOT EXISTS cases_level_idx ON cases (level)`);
+  await query(`CREATE INDEX IF NOT EXISTS cases_deleted_at_idx ON cases (deleted_at) WHERE deleted_at IS NULL`);
+  await query(`CREATE INDEX IF NOT EXISTS cases_created_at_idx ON cases (created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS cases_fts_idx ON cases USING GIN (to_tsvector('english', coalesce(title,'') || ' ' || coalesce(body,'')))`);
 
   // Multi-specialty support: a case can be tagged with one or more specialties.
   // The legacy `specialty` column is kept in sync with specialties[0] so any old
@@ -153,6 +159,7 @@ export async function initDb() {
   )`);
 
   await query(`CREATE INDEX IF NOT EXISTS case_verifications_case_idx ON case_verifications (case_id, created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS case_verifications_action_idx ON case_verifications (case_id, action)`);
 
   await query(`CREATE TABLE IF NOT EXISTS responses (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -166,6 +173,9 @@ export async function initDb() {
   )`);
 
   await query(`CREATE INDEX IF NOT EXISTS responses_user_idx ON responses (user_id, created_at DESC)`);
+  await query(`CREATE INDEX IF NOT EXISTS responses_user_case_idx ON responses (user_id, case_id)`);
+  await query(`CREATE INDEX IF NOT EXISTS responses_score_idx ON responses (user_id, score)`);
+  await query(`CREATE INDEX IF NOT EXISTS responses_case_created_idx ON responses (case_id, created_at DESC)`);
 
   await query(`CREATE TABLE IF NOT EXISTS thumbs_up (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

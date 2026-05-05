@@ -3,6 +3,7 @@ import multer from "multer";
 import { query } from "../db.js";
 import { requireAuth } from "../auth-middleware.js";
 import { uploadBuffer, destroyAsset, isConfigured as cloudinaryReady } from "../cloudinary.js";
+import { cacheGet, cacheSet, cacheInvalidate } from "../cache.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -86,13 +87,17 @@ router.post("/import", requireAuth(["admin", "doctor"]), async (req, res) => {
 // ── Specialties ────────────────────────────────────────────────────────────
 
 router.get("/specialties", requireAuth(), async (_req, res) => {
+  const cached = cacheGet("dx:specs");
+  if (cached !== undefined) return res.json(cached);
   const { rows } = await query(
     `SELECT s.id, s.name, s.icon, s.description, s.position, s.created_at,
             (SELECT COUNT(*)::int FROM dx_topics t WHERE t.specialty_id = s.id) AS topic_count
        FROM dx_specialties s
       ORDER BY s.position ASC, s.name ASC`
   );
-  res.json({ specialties: rows });
+  const result = { specialties: rows };
+  cacheSet("dx:specs", result, 300_000);
+  res.json(result);
 });
 
 router.post("/specialties", requireAuth(["admin", "doctor"]), async (req, res) => {
@@ -108,6 +113,7 @@ router.post("/specialties", requireAuth(["admin", "doctor"]), async (req, res) =
        RETURNING id`,
       [name, icon, description, req.user.id]
     );
+    cacheInvalidate("dx:specs");
     res.json({ ok: true, id: rows[0].id });
   } catch (e) {
     console.error("[dx] create specialty failed", e);
@@ -126,6 +132,8 @@ router.patch("/specialties/:id", requireAuth(["admin"]), async (req, res) => {
   if (!fields.length) return res.status(400).json({ error: "Nothing to update" });
   params.push(req.params.id);
   await query(`UPDATE dx_specialties SET ${fields.join(", ")} WHERE id=$${params.length}`, params);
+  cacheInvalidate("dx:specs");
+  cacheInvalidate(`dx:topics:${req.params.id}`);
   res.json({ ok: true });
 });
 
@@ -142,12 +150,18 @@ router.delete("/specialties/:id", requireAuth(["admin"]), async (req, res) => {
     await destroyAsset(rest.join(":"), resType).catch(() => {});
   }
   await query(`DELETE FROM dx_specialties WHERE id=$1`, [req.params.id]);
+  cacheInvalidate("dx:specs");
+  cacheInvalidate(`dx:topics:${req.params.id}`);
+  cacheInvalidate("dx:topic:");
   res.json({ ok: true });
 });
 
 // ── Topics ─────────────────────────────────────────────────────────────────
 
 router.get("/specialties/:id/topics", requireAuth(), async (req, res) => {
+  const cacheKey = `dx:topics:${req.params.id}`;
+  const cached = cacheGet(cacheKey);
+  if (cached !== undefined) return res.json(cached);
   const { rows: sp } = await query(
     `SELECT id, name, icon, description FROM dx_specialties WHERE id=$1`, [req.params.id]
   );
@@ -160,10 +174,15 @@ router.get("/specialties/:id/topics", requireAuth(), async (req, res) => {
       ORDER BY t.position ASC, t.title ASC`,
     [req.params.id]
   );
-  res.json({ specialty: sp[0], topics: rows });
+  const result = { specialty: sp[0], topics: rows };
+  cacheSet(cacheKey, result, 120_000);
+  res.json(result);
 });
 
 router.get("/topics/:id", requireAuth(), async (req, res) => {
+  const cacheKey = `dx:topic:${req.params.id}`;
+  const cached = cacheGet(cacheKey);
+  if (cached !== undefined) return res.json(cached);
   const { rows } = await query(
     `SELECT t.id, t.specialty_id, t.title, t.explanation, t.position, t.created_at, t.updated_at,
             s.name AS specialty_name, s.icon AS specialty_icon,
@@ -181,7 +200,9 @@ router.get("/topics/:id", requireAuth(), async (req, res) => {
        FROM dx_attachments WHERE topic_id=$1 ORDER BY created_at ASC`,
     [req.params.id]
   );
-  res.json({ topic: t, attachments: atts });
+  const result = { topic: t, attachments: atts };
+  cacheSet(cacheKey, result, 120_000);
+  res.json(result);
 });
 
 router.post("/specialties/:id/topics", requireAuth(["admin", "doctor"]), async (req, res) => {
@@ -194,6 +215,8 @@ router.post("/specialties/:id/topics", requireAuth(["admin", "doctor"]), async (
        VALUES ($1,$2,$3,$4) RETURNING id`,
       [req.params.id, title, explanation, req.user.id]
     );
+    cacheInvalidate(`dx:topics:${req.params.id}`);
+    cacheInvalidate("dx:specs");
     res.json({ ok: true, id: rows[0].id });
   } catch (e) {
     console.error("[dx] create topic failed", e);
@@ -212,16 +235,30 @@ router.patch("/topics/:id", requireAuth(["admin"]), async (req, res) => {
   fields.push(`updated_at=NOW()`);
   params.push(req.params.id);
   await query(`UPDATE dx_topics SET ${fields.join(", ")} WHERE id=$${params.length}`, params);
+  cacheInvalidate(`dx:topic:${req.params.id}`);
+  cacheInvalidate("dx:topics:");
   res.json({ ok: true });
 });
 
 router.delete("/topics/:id", requireAuth(["admin"]), async (req, res) => {
-  const { rows } = await query(`SELECT storage_key FROM dx_attachments WHERE topic_id=$1 AND storage_key IS NOT NULL`, [req.params.id]);
+  const { rows } = await query(
+    `SELECT a.storage_key, t.specialty_id FROM dx_attachments a JOIN dx_topics t ON t.id=a.topic_id WHERE a.topic_id=$1 AND a.storage_key IS NOT NULL`,
+    [req.params.id]
+  );
+  const specialtyId = rows[0]?.specialty_id;
   for (const r of rows) {
     const [resType, ...rest] = r.storage_key.split(":");
     await destroyAsset(rest.join(":"), resType).catch(() => {});
   }
+  if (!specialtyId) {
+    const { rows: t } = await query(`SELECT specialty_id FROM dx_topics WHERE id=$1`, [req.params.id]);
+    if (t[0]) cacheInvalidate(`dx:topics:${t[0].specialty_id}`);
+  } else {
+    cacheInvalidate(`dx:topics:${specialtyId}`);
+  }
   await query(`DELETE FROM dx_topics WHERE id=$1`, [req.params.id]);
+  cacheInvalidate(`dx:topic:${req.params.id}`);
+  cacheInvalidate("dx:specs");
   res.json({ ok: true });
 });
 
@@ -247,6 +284,7 @@ router.post("/topics/:id/attachments", requireAuth(["admin", "doctor"]), upload.
       );
       inserted.push(rows[0]);
     }
+    cacheInvalidate(`dx:topic:${req.params.id}`);
     res.json({ ok: true, attachments: inserted });
   } catch (e) {
     console.error("[dx] upload attachments failed", e);
@@ -261,13 +299,14 @@ router.patch("/attachments/:id", requireAuth(["admin", "doctor"]), async (req, r
 });
 
 router.delete("/attachments/:id", requireAuth(["admin"]), async (req, res) => {
-  const { rows } = await query(`SELECT storage_key FROM dx_attachments WHERE id=$1`, [req.params.id]);
+  const { rows } = await query(`SELECT storage_key, topic_id FROM dx_attachments WHERE id=$1`, [req.params.id]);
   const a = rows[0];
   if (a?.storage_key) {
     const [resType, ...rest] = a.storage_key.split(":");
     await destroyAsset(rest.join(":"), resType).catch(() => {});
   }
   await query(`DELETE FROM dx_attachments WHERE id=$1`, [req.params.id]);
+  if (a?.topic_id) cacheInvalidate(`dx:topic:${a.topic_id}`);
   res.json({ ok: true });
 });
 

@@ -4,6 +4,7 @@ import { query } from "../db.js";
 import { requireAuth } from "../auth-middleware.js";
 import { caseOpenai, matchOpenai, evalOpenai } from "../openai.js";
 import { uploadBuffer, destroyAsset, isConfigured } from "../cloudinary.js";
+import { cacheGet, cacheSet, cacheInvalidate } from "../cache.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
@@ -11,17 +12,24 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 *
 // ── Public listings ─────────────────────────────────────────────────────────
 
 router.get("/specialties", requireAuth(), async (_req, res) => {
+  const cached = cacheGet("mock:specialties");
+  if (cached !== undefined) return res.json(cached);
   const { rows } = await query(
     `SELECT specialty, COUNT(*)::int AS n
        FROM mock_questions
       GROUP BY specialty
       ORDER BY specialty ASC`
   );
-  res.json({ specialties: rows.map((r) => r.specialty) });
+  const result = { specialties: rows.map((r) => r.specialty) };
+  cacheSet("mock:specialties", result, 300_000);
+  res.json(result);
 });
 
 router.get("/topics", requireAuth(), async (req, res) => {
   const specialty = (req.query.specialty || "").toString().trim();
+  const cacheKey = `mock:topics:${specialty || "all"}`;
+  const cached = cacheGet(cacheKey);
+  if (cached !== undefined) return res.json(cached);
   const params = [];
   const where = [];
   if (specialty) { params.push(specialty); where.push(`specialty = $${params.length}`); }
@@ -34,7 +42,9 @@ router.get("/topics", requireAuth(), async (req, res) => {
       ORDER BY topic ASC`,
     params
   );
-  res.json({ topics: rows.map((r) => r.topic) });
+  const result = { topics: rows.map((r) => r.topic) };
+  cacheSet(cacheKey, result, 300_000);
+  res.json(result);
 });
 
 // ── AI helpers ──────────────────────────────────────────────────────────────
@@ -811,6 +821,11 @@ router.post("/questions/bulk", requireAuth(["admin", "doctor"]), upload.any(), a
 // ── Question bank CRUD ───────────────────────────────────────────────────────
 router.get("/questions", requireAuth(["admin", "doctor"]), async (req, res) => {
   const specialty = (req.query.specialty || "").toString().trim();
+
+  const cacheKey = `mock:questions:${specialty}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return res.json(cached);
+
   const params = [];
   let where = "";
   if (specialty) { params.push(specialty); where = ` WHERE specialty = $1`; }
@@ -823,7 +838,9 @@ router.get("/questions", requireAuth(["admin", "doctor"]), async (req, res) => {
       ORDER BY q.created_at DESC LIMIT 500`,
     params
   );
-  res.json({ questions: rows });
+  const result = { questions: rows };
+  cacheSet(cacheKey, result, 60_000);
+  res.json(result);
 });
 
 router.post("/questions", requireAuth(["admin", "doctor"]), async (req, res) => {
@@ -846,6 +863,9 @@ router.post("/questions", requireAuth(["admin", "doctor"]), async (req, res) => 
       [type, b.specialty, b.topic || null, b.prompt, options ? JSON.stringify(options) : null,
        String(b.correct_answer), String(b.explanation), marks, b.difficulty || null, req.user.id]
     );
+    cacheInvalidate("mock:questions:");
+    cacheInvalidate("mock:specialties");
+    cacheInvalidate("mock:topics:");
     res.json({ ok: true, id: rows[0].id });
   } catch (e) {
     console.error("[mock] create question failed", e);
@@ -899,6 +919,9 @@ router.patch("/questions/:id", requireAuth(["admin"]), async (req, res) => {
     fields.push(`updated_at=NOW()`);
     params.push(req.params.id);
     await query(`UPDATE mock_questions SET ${fields.join(", ")} WHERE id=$${params.length}`, params);
+    cacheInvalidate("mock:questions:");
+    cacheInvalidate("mock:specialties");
+    cacheInvalidate("mock:topics:");
     res.json({ ok: true });
   } catch (e) {
     console.error("[mock] update question failed", e);
@@ -911,6 +934,9 @@ router.delete("/questions/:id", requireAuth(["admin"]), async (req, res) => {
     const { rows } = await query(`SELECT attachment_key FROM mock_questions WHERE id=$1`, [req.params.id]);
     if (rows[0]?.attachment_key) await destroyAsset(rows[0].attachment_key).catch(() => {});
     await query(`DELETE FROM mock_questions WHERE id=$1`, [req.params.id]);
+    cacheInvalidate("mock:questions:");
+    cacheInvalidate("mock:specialties");
+    cacheInvalidate("mock:topics:");
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });

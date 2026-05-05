@@ -3,6 +3,65 @@ import { Mail, Clock, CheckCircle } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
 import { Link } from "wouter";
 
+const styles = `
+.contact-wrap {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 40px 20px 80px;
+}
+.contact-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.contact-info-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px 20px;
+  min-width: 0;
+}
+.contact-info-value {
+  font-size: 14px;
+  color: var(--ink-800);
+  font-weight: 600;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+.contact-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 520px) {
+  .contact-wrap {
+    padding: 24px 16px 64px;
+  }
+  .contact-info-grid {
+    grid-template-columns: 1fr;
+  }
+  .contact-info-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+  }
+  .contact-info-card-body {
+    min-width: 0;
+  }
+  .contact-info-value {
+    font-size: 13px;
+  }
+  .contact-form-row {
+    grid-template-columns: 1fr;
+  }
+  .contact-title {
+    font-size: 24px !important;
+  }
+}
+`;
+
 export default function Contact() {
   const [sent, setSent] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", subject: "", message: "" });
@@ -37,7 +96,8 @@ export default function Contact() {
 
   return (
     <AppShell>
-      <div style={{ maxWidth: 680, margin: "0 auto", padding: "40px 20px 80px" }}>
+      <style>{styles}</style>
+      <div className="contact-wrap">
         <div style={{ marginBottom: 32 }}>
           <Link href="/" style={{ fontSize: 13, color: "var(--ink-400)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
             ← Back to home
@@ -46,9 +106,9 @@ export default function Contact() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 32 }}>
           <div style={{
-            width: 52, height: 52, borderRadius: 16,
+            width: 52, height: 52, borderRadius: 16, flexShrink: 0,
             background: "linear-gradient(135deg, #0ea5e9, #0284c7)",
-            display: "grid", placeItems: "center", flexShrink: 0,
+            display: "grid", placeItems: "center",
           }}>
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
               <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
@@ -56,23 +116,26 @@ export default function Contact() {
             </svg>
           </div>
           <div>
-            <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: "var(--ink-900)" }}>Contact Us</h1>
+            <h1 className="contact-title" style={{ margin: 0, fontSize: 28, fontWeight: 800, color: "var(--ink-900)" }}>Contact Us</h1>
             <p style={{ margin: 0, fontSize: 14, color: "var(--ink-400)" }}>We usually reply within 24 hours</p>
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 32 }}>
+        <div className="contact-info-grid">
           {[
             { Icon: Mail,  label: "Email", value: "clinicalreasoningofficial@gmail.com" },
             { Icon: Clock, label: "Response time", value: "Within 24 hours" },
           ].map(({ Icon, label, value }) => (
-            <div key={label} style={{
-              background: "var(--bg-elev)", border: "1px solid var(--line)",
-              borderRadius: 14, padding: "18px 20px",
-            }}>
-              <div style={{ marginBottom: 6, color: "var(--primary)" }}><Icon size={22} strokeWidth={1.75} /></div>
-              <div style={{ fontSize: 12, color: "var(--ink-400)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{label}</div>
-              <div style={{ fontSize: 14, color: "var(--ink-800)", fontWeight: 600 }}>{value}</div>
+            <div key={label} className="contact-info-card">
+              <div style={{ color: "var(--primary)", flexShrink: 0, marginBottom: 6 }} className="contact-info-icon">
+                <Icon size={22} strokeWidth={1.75} />
+              </div>
+              <div className="contact-info-card-body">
+                <div style={{ fontSize: 12, color: "var(--ink-400)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>
+                  {label}
+                </div>
+                <div className="contact-info-value">{value}</div>
+              </div>
             </div>
           ))}
         </div>
@@ -94,7 +157,7 @@ export default function Contact() {
             borderRadius: 18, padding: "28px",
             display: "flex", flexDirection: "column", gap: 18,
           }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div className="contact-form-row">
               <div>
                 <label style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-700)", display: "block", marginBottom: 6 }}>
                   Name <span style={{ color: "var(--danger)" }}>*</span>

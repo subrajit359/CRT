@@ -1,4 +1,4 @@
-import { useState, Suspense, lazy } from "react";
+import { useState, useRef, Suspense, lazy } from "react";
 import AppShell from "../components/AppShell.jsx";
 
 const NeetBlogPage       = lazy(() => import("../components/NeetBlogPage.jsx"));
@@ -10,18 +10,26 @@ const PageSpinner = () => (
 
 export default function PublicBlog() {
   const [selectedPostId, setSelectedPostId] = useState(null);
+  const lastOpenedPostId = useRef(null);
 
   return (
     <AppShell>
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 0 80px" }}>
         <Suspense fallback={<PageSpinner />}>
-          {selectedPostId ? (
+          <div style={{ display: selectedPostId ? "none" : "block" }}>
+            <NeetBlogPage
+              scrollToPostId={lastOpenedPostId.current}
+              onPostSelect={(id) => {
+                lastOpenedPostId.current = id;
+                setSelectedPostId(id);
+              }}
+            />
+          </div>
+          {selectedPostId && (
             <NeetResourceDetails
               postId={selectedPostId}
               onBack={() => setSelectedPostId(null)}
             />
-          ) : (
-            <NeetBlogPage onPostSelect={(id) => setSelectedPostId(id)} />
           )}
         </Suspense>
       </div>

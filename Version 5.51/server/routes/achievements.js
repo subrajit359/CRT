@@ -1,6 +1,7 @@
 import express from "express";
 import { query } from "../db.js";
 import { requireAuth } from "../auth-middleware.js";
+import { cacheGet, cacheSet, cacheInvalidate } from "../cache.js";
 
 const router = express.Router();
 
@@ -169,6 +170,10 @@ export async function checkAndUnlockAchievements(userId, { score = null, isPract
 // ── GET /api/achievements ─────────────────────────────────────────────────────
 router.get("/", requireAuth(), async (req, res) => {
   try {
+    const _achKey = `ach:${req.user.id}`;
+    const _achCached = cacheGet(_achKey);
+    if (_achCached !== undefined) return res.json(_achCached);
+
     const [{ rows: unlocked }, { rows: xpRow }] = await Promise.all([
       query(
         `SELECT key, unlocked_at FROM achievements WHERE user_id=$1 ORDER BY unlocked_at DESC`,
@@ -189,12 +194,14 @@ router.get("/", requireAuth(), async (req, res) => {
       unlocked_at: unlockedMap.get(a.key) || null,
     }));
 
-    res.json({
+    const _achResult = {
       achievements: all,
       xp,
       unlockedCount: unlocked.length,
       totalCount: ACHIEVEMENTS.length,
-    });
+    };
+    cacheSet(_achKey, _achResult, 120_000);
+    res.json(_achResult);
   } catch (e) {
     console.error("[achievements] GET /", e);
     res.status(500).json({ error: e.message });

@@ -98,6 +98,17 @@ function ProtectedRoute({ children, roles }) {
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
+  useEffect(() => {
+    if (!user || user.role !== "student") return;
+    import("./lib/query.js").then(({ prefetchApiQuery }) => {
+      prefetchApiQuery("/api/eval/stats");
+      prefetchApiQuery("/api/eval/next");
+      prefetchApiQuery("/api/eval/changes");
+      prefetchApiQuery("/api/cases/count");
+      prefetchApiQuery("/api/achievements");
+      prefetchApiQuery("/api/leaderboard?period=all&page=1&pageSize=1");
+    });
+  }, [user?.id]);
   if (loading) return <PageSpinner />;
   if (!user) return <Landing />;
   if (isPendingDoctor(user)) return <PendingDoctorInbox />;

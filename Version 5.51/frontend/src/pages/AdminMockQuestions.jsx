@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -59,12 +60,19 @@ function TypeBadge({ type }) {
 function Modal({ open, onClose, title, children, maxWidth = 680 }) {
   useEffect(() => {
     if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     const handler = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -111,7 +119,8 @@ function Modal({ open, onClose, title, children, maxWidth = 680 }) {
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
 
@@ -863,6 +872,8 @@ export default function AdminMockQuestions() {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploadingFor, setUploadingFor] = useState(null);
+  const [qPage, setQPage] = useState(1);
+  const Q_PER_PAGE = 10;
 
   /* form modal */
   const [formOpen, setFormOpen] = useState(false);
@@ -1070,12 +1081,13 @@ export default function AdminMockQuestions() {
         }}>
           <Filter size={15} color="var(--ink-400)" />
           <select className="input" style={{ maxWidth: 240, margin: 0 }} value={filter}
-            onChange={(e) => setFilter(e.target.value)}>
+            onChange={(e) => { setFilter(e.target.value); setQPage(1); }}>
             <option value="">All specialties</option>
             {specialties.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           <span style={{ marginLeft: "auto", fontSize: 13, color: "var(--ink-400)" }}>
             {questions.length} question{questions.length === 1 ? "" : "s"}
+            {questions.length > Q_PER_PAGE && ` · page ${qPage} of ${Math.ceil(questions.length / Q_PER_PAGE)}`}
           </span>
         </div>
 
@@ -1108,7 +1120,7 @@ export default function AdminMockQuestions() {
         ) : (
           <AnimatePresence>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {questions.map((q) => (
+              {questions.slice((qPage - 1) * Q_PER_PAGE, qPage * Q_PER_PAGE).map((q) => (
                 <QuestionCard
                   key={q.id}
                   q={q}
@@ -1124,6 +1136,49 @@ export default function AdminMockQuestions() {
             </div>
           </AnimatePresence>
         )}
+
+        {/* ── Pagination ── */}
+        {!loading && questions.length > Q_PER_PAGE && (() => {
+          const totalPages = Math.ceil(questions.length / Q_PER_PAGE);
+          function getPages() {
+            if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+            const pages = [1];
+            if (qPage > 3) pages.push("…");
+            for (let p = Math.max(2, qPage - 1); p <= Math.min(totalPages - 1, qPage + 1); p++) pages.push(p);
+            if (qPage < totalPages - 2) pages.push("…");
+            pages.push(totalPages);
+            return pages;
+          }
+          return (
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 6, paddingTop: 20 }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => { setQPage((p) => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                disabled={qPage === 1}
+              >← Prev</button>
+              {getPages().map((p, i) =>
+                p === "…"
+                  ? <span key={`el-${i}`} style={{ padding: "0 4px", color: "var(--ink-400)" }}>…</span>
+                  : <button
+                      key={p}
+                      className="btn btn-sm"
+                      style={{
+                        minWidth: 34, padding: "0 8px",
+                        background: p === qPage ? "var(--primary)" : "var(--bg-elev)",
+                        color: p === qPage ? "#fff" : "var(--ink-700)",
+                        border: "1px solid var(--line)",
+                      }}
+                      onClick={() => { setQPage(p); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                    >{p}</button>
+              )}
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => { setQPage((p) => Math.min(totalPages, p + 1)); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                disabled={qPage === totalPages}
+              >Next →</button>
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── Add/Edit modal ── */}

@@ -3,6 +3,7 @@ import { query } from "../db.js";
 import { requireAuth } from "../auth-middleware.js";
 import { matchOpenai, evalOpenai, loadPrompt } from "../openai.js";
 import { checkAndUnlockAchievements, awardXp } from "./achievements.js";
+import { cacheGet, cacheSet, cacheInvalidate } from "../cache.js";
 
 function evalXp(score) {
   if (score == null) return 5;
@@ -299,6 +300,12 @@ router.post("/", requireAuth(), async (req, res) => {
         awardXp(req.user.id, evalXp(score)).catch(() => {});
         newAchievements = await checkAndUnlockAchievements(req.user.id, { score, isPractice: false });
       }
+      cacheInvalidate(`eval:stats:${req.user.id}`);
+      cacheInvalidate(`eval:next:${req.user.id}`);
+      cacheInvalidate(`eval:changes:${req.user.id}`);
+      cacheInvalidate(`ach:${req.user.id}`);
+      cacheInvalidate(`cases:groups:${req.user.id}:`);
+      cacheInvalidate("cases:count");
     }
 
     let leveledUp = false;
@@ -467,6 +474,11 @@ router.post("/stream", requireAuth(), async (req, res) => {
         awardXp(req.user.id, evalXp(score)).catch(() => {});
         newAchievements = await checkAndUnlockAchievements(req.user.id, { score, isPractice: false });
       }
+      cacheInvalidate(`eval:stats:${req.user.id}`);
+      cacheInvalidate(`eval:next:${req.user.id}`);
+      cacheInvalidate(`eval:changes:${req.user.id}`);
+      cacheInvalidate(`ach:${req.user.id}`);
+      cacheInvalidate(`cases:groups:${req.user.id}:`);
     }
 
     let leveledUp = false, newLevel = null;
@@ -496,6 +508,9 @@ router.get("/history", requireAuth(), async (req, res) => {
 
 router.get("/stats", requireAuth(), async (req, res) => {
   const userId = req.user.id;
+  const _sk = `eval:stats:${userId}`;
+  const _sc = cacheGet(_sk);
+  if (_sc !== undefined) return res.json(_sc);
 
   const [
     { rows: agg },
@@ -596,11 +611,16 @@ router.get("/stats", requireAuth(), async (req, res) => {
     mastery: s.avg_score != null ? Math.max(0, Math.min(1, s.avg_score / 10)) : null,
   }));
 
-  res.json({ attempts: agg[0].attempts, averageScore: agg[0].avg_score, bySpecialty: bySpec, weakAreas: weak, trend, delta, streak, maxStreak, daysSinceLast, strength, strengthState, strengthFloor, weeklyCount, weeklyTarget, mastery });
+  const _statsResult = { attempts: agg[0].attempts, averageScore: agg[0].avg_score, bySpecialty: bySpec, weakAreas: weak, trend, delta, streak, maxStreak, daysSinceLast, strength, strengthState, strengthFloor, weeklyCount, weeklyTarget, mastery };
+  cacheSet(_sk, _statsResult, 60_000);
+  res.json(_statsResult);
 });
 
 router.get("/next", requireAuth(), async (req, res) => {
   const userId = req.user.id;
+  const _nk = `eval:next:${userId}`;
+  const _nc = cacheGet(_nk);
+  if (_nc !== undefined) return res.json(_nc);
   const [{ rows: weak }, { rows: profile }] = await Promise.all([
     query(`SELECT c.specialty, AVG(r.score)::float AS avg_score, COUNT(*)::int AS n FROM responses r JOIN cases c ON c.id=r.case_id WHERE r.user_id=$1 GROUP BY c.specialty HAVING COUNT(*) >= 2 AND AVG(r.score) < 7 ORDER BY AVG(r.score) ASC LIMIT 1`, [userId]),
     query(`SELECT global_level FROM student_profiles WHERE user_id=$1`, [userId]),
@@ -632,11 +652,16 @@ router.get("/next", requireAuth(), async (req, res) => {
 
   const c = rows[0];
   const preview = (c.body || "").replace(/\s+/g, " ").trim().slice(0, 220);
-  res.json({ case: { id: c.id, title: c.title, specialty: c.specialty, level: c.level, verify_count: c.verify_count, preview }, why, targetSpecialty, targetLevel: level });
+  const _nextResult = { case: { id: c.id, title: c.title, specialty: c.specialty, level: c.level, verify_count: c.verify_count, preview }, why, targetSpecialty, targetLevel: level };
+  cacheSet(_nk, _nextResult, 120_000);
+  res.json(_nextResult);
 });
 
 router.get("/changes", requireAuth(), async (req, res) => {
   const userId = req.user.id;
+  const _ck = `eval:changes:${userId}`;
+  const _cc = cacheGet(_ck);
+  if (_cc !== undefined) return res.json(_cc);
   const events = [];
 
   const [{ rows: notifs }, { rows: attempts }] = await Promise.all([
@@ -657,7 +682,9 @@ router.get("/changes", requireAuth(), async (req, res) => {
   }
 
   events.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  res.json({ events: events.slice(0, 10) });
+  const _changesResult = { events: events.slice(0, 10) };
+  cacheSet(_ck, _changesResult, 30_000);
+  res.json(_changesResult);
 });
 
 export default router;

@@ -523,6 +523,7 @@ export default function StudyResources() {
 
   const [activeTab, setActiveTab] = useState("blog");
   const [selectedBlogPostId, setSelectedBlogPostId] = useState(null);
+  const lastOpenedBlogPostId = useRef(null);
 
   const [path, setPath]             = useState([]);
   const [categories, setCategories] = useState([]);
@@ -665,13 +666,20 @@ export default function StudyResources() {
         {activeTab === "blog" && (
           <div style={{ margin: "0 -16px" }}>
             <Suspense fallback={<div className="page-center"><div className="spinner-lg" /></div>}>
-              {selectedBlogPostId ? (
+              <div style={{ display: selectedBlogPostId ? "none" : "block" }}>
+                <NeetBlogPage
+                  scrollToPostId={lastOpenedBlogPostId.current}
+                  onPostSelect={(id) => {
+                    lastOpenedBlogPostId.current = id;
+                    setSelectedBlogPostId(id);
+                  }}
+                />
+              </div>
+              {selectedBlogPostId && (
                 <NeetResourceDetails
                   postId={selectedBlogPostId}
                   onBack={() => setSelectedBlogPostId(null)}
                 />
-              ) : (
-                <NeetBlogPage onPostSelect={(id) => setSelectedBlogPostId(id)} />
               )}
             </Suspense>
           </div>

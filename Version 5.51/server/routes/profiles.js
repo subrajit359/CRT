@@ -3,6 +3,7 @@ import multer from "multer";
 import { query } from "../db.js";
 import { requireAuth } from "../auth-middleware.js";
 import { uploadBuffer, destroyAsset, isConfigured as cloudinaryReady } from "../cloudinary.js";
+import { cacheGet, cacheSet, cacheInvalidate } from "../cache.js";
 
 const router = express.Router();
 
@@ -16,6 +17,9 @@ const upload = multer({
 });
 
 router.get("/:username", requireAuth(), async (req, res) => {
+  const _pck = `profile:${req.params.username}`;
+  const _pcc = cacheGet(_pck);
+  if (_pcc !== undefined) return res.json(_pcc);
   const { rows } = await query(
     `SELECT id, username, full_name, role, country, created_at, avatar_url
        FROM users WHERE username=$1`,
@@ -51,13 +55,15 @@ router.get("/:username", requireAuth(), async (req, res) => {
       ),
     ]);
 
-    return res.json({
+    const _dr = {
       user: u,
       doctor: dp[0] || null,
       uploaded,
       verifications: verifs,
       discussionContributions: discCount[0].n,
-    });
+    };
+    cacheSet(_pck, _dr, 120_000);
+    return res.json(_dr);
   }
 
   if (u.role === "student") {
@@ -78,7 +84,7 @@ router.get("/:username", requireAuth(), async (req, res) => {
     ]);
 
     const showScores = !!(sp[0] && sp[0].show_scores);
-    return res.json({
+    const _sr = {
       user: u,
       student: sp[0] || null,
       attempts: stats[0].attempts,
@@ -86,10 +92,14 @@ router.get("/:username", requireAuth(), async (req, res) => {
       showScores,
       xp: sp[0]?.xp ?? 0,
       achievements: achRows,
-    });
+    };
+    cacheSet(_pck, _sr, 120_000);
+    return res.json(_sr);
   }
 
-  res.json({ user: u });
+  const _gr = { user: u };
+  cacheSet(_pck, _gr, 120_000);
+  res.json(_gr);
 });
 
 router.patch("/me", requireAuth(), async (req, res) => {
@@ -133,6 +143,7 @@ router.patch("/me", requireAuth(), async (req, res) => {
       [req.body.country || null, req.user.id]
     );
   }
+  if (req.user.username) cacheInvalidate(`profile:${req.user.username}`);
   res.json({ ok: true });
 });
 
@@ -161,6 +172,7 @@ router.post("/me/avatar", requireAuth(), upload.single("avatar"), async (req, re
     destroyAsset(oldKey).catch(() => {});
   }
 
+  if (req.user.username) cacheInvalidate(`profile:${req.user.username}`);
   res.json({ ok: true, avatarUrl: result.secure_url });
 });
 
@@ -173,6 +185,7 @@ router.delete("/me/avatar", requireAuth(), async (req, res) => {
   await query(
     `UPDATE users SET avatar_url=NULL, avatar_key=NULL WHERE id=$1`, [req.user.id]
   );
+  if (req.user.username) cacheInvalidate(`profile:${req.user.username}`);
   res.json({ ok: true });
 });
 

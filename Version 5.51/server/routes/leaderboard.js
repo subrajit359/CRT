@@ -1,6 +1,7 @@
 import express from "express";
 import { query } from "../db.js";
 import { requireAuth } from "../auth-middleware.js";
+import { cacheGet, cacheSet } from "../cache.js";
 
 const router = express.Router();
 
@@ -87,6 +88,10 @@ router.get("/", requireAuth(), async (req, res) => {
   const specialtyFilter = (req.query.specialty || "").toString().trim();
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const pageSize = Math.max(1, Math.min(100, parseInt(req.query.pageSize, 10) || 25));
+
+  const _lbKey = `lb:${period}:${category}:${specialtyFilter}:${page}:${pageSize}:${req.user.id}`;
+  const _lbCached = cacheGet(_lbKey);
+  if (_lbCached !== undefined) return res.json(_lbCached);
 
   let intervalClause = "";
   if (period === "week") intervalClause = "AND r.created_at > NOW() - INTERVAL '7 days'";
@@ -233,11 +238,13 @@ router.get("/", requireAuth(), async (req, res) => {
   const start = (page - 1) * pageSize;
   const pageRows = restEntries.slice(start, start + pageSize);
 
-  res.json({
+  const _lbResult = {
     period, category, specialty: specialtyFilter || null,
     totalUsers, page, pageSize, totalPages,
     currentUser, topThree, rows: pageRows,
-  });
+  };
+  cacheSet(_lbKey, _lbResult, 120_000);
+  res.json(_lbResult);
 });
 
 export default router;

@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import "../styles/Resourcedetail.css";
+import { apiUrl } from "../lib/api.js";
 
 const IconFile = ({ size = 20 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -277,6 +279,26 @@ function formatDate(ts) {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+// Normalize a neet post from /neet-api/posts/:id to the expected shape
+function normalizePost(raw) {
+  if (!raw) return null;
+  return {
+    ...raw,
+    description: raw.description || "",
+    badge: raw.badge || "",
+    keywords: raw.keywords || "",
+    sections: (raw.sections || []).map((sec) => ({
+      ...sec,
+      resources: (sec.resources || []).map((item) => ({
+        ...item,
+        title: item.title || "",
+        drive_link: item.drive_link || "",
+        description: item.description || "",
+      })),
+    })),
+  };
+}
+
 export default function NeetResourceDetails({ postId, onBack }) {
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -287,10 +309,19 @@ export default function NeetResourceDetails({ postId, onBack }) {
   const [iframeZoom, setIframeZoom] = useState(1);
 
   useEffect(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, []);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
     setLoading(true);
-    fetch(apiUrl(`/neet-api/posts/${postId}`))
+    fetch(`/neet-api/posts/${postId}`)
       .then((r) => r.json())
-      .then((data) => { setPost(data); setLoading(false); })
+      .then((data) => { setPost(normalizePost(data)); setLoading(false); })
       .catch(() => setLoading(false));
   }, [postId]);
 
@@ -298,7 +329,7 @@ export default function NeetResourceDetails({ postId, onBack }) {
     if (!postId) return;
     const key = `vp_${postId}`;
     if (localStorage.getItem(key)) return;
-    fetch(apiUrl(`/neet-api/posts/${postId}/view`), { method: "POST" })
+    fetch(`/neet-api/posts/${postId}/view`, { method: "POST" })
       .then(() => localStorage.setItem(key, "1"))
       .catch(() => {});
   }, [postId]);
@@ -406,7 +437,12 @@ export default function NeetResourceDetails({ postId, onBack }) {
                       {item.description && <p className="rd-card-desc">{item.description}</p>}
                     </div>
                     <div className="rd-card-actions">
-                      <button className="rd-btn-preview" onClick={() => setPreview(item)}>
+                      <button
+                        className="rd-btn-preview"
+                        onClick={() => setPreview(item)}
+                        disabled={!item.drive_link}
+                        title={!item.drive_link ? "No preview link" : "Preview"}
+                      >
                         <IconEye size={13} /> Preview
                       </button>
                       {item.drive_link ? (
@@ -439,11 +475,14 @@ export default function NeetResourceDetails({ postId, onBack }) {
         </div>
       </article>
 
-      {zoomImg && <ImageZoom src={zoomImg.src} alt={zoomImg.alt} onClose={() => setZoomImg(null)} />}
+      {zoomImg && createPortal(
+        <ImageZoom src={zoomImg.src} alt={zoomImg.alt} onClose={() => setZoomImg(null)} />,
+        document.body
+      )}
 
-      {preview && (
-        <div className={`rd-overlay${iframeZoom > 1 ? " rd-overlay-zoomed" : ""}`} onClick={() => setPreview(null)}>
-          <div className={`rd-popup${iframeZoom > 1 ? " rd-popup-zoomed" : ""}`} onClick={(e) => e.stopPropagation()}>
+      {preview && createPortal(
+        <div className="rd-overlay" onClick={() => setPreview(null)}>
+          <div className="rd-popup" onClick={(e) => e.stopPropagation()}>
             <div className="rd-popup-header">
               <div className="rd-popup-icon"><IconFile size={20} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -469,12 +508,11 @@ export default function NeetResourceDetails({ postId, onBack }) {
                   loading="lazy"
                   onLoad={() => setIframeLoaded(true)}
                   style={{
-                    transform: iframeZoom > 1 ? `scale(${iframeZoom})` : "none",
-                    transformOrigin: "top left",
-                    width: iframeZoom > 1 ? `${100 / iframeZoom}%` : "100%",
-                    height: iframeZoom > 1 ? `${100 / iframeZoom}%` : undefined,
+                    width: `${iframeZoom * 100}%`,
+                    height: `${iframeZoom * 100}%`,
                     opacity: iframeLoaded ? 1 : 0,
                     transition: "opacity 0.3s",
+                    flexShrink: 0,
                   }}
                 />
                 <div className="rd-iframe-cover" />
@@ -486,7 +524,7 @@ export default function NeetResourceDetails({ postId, onBack }) {
                   <span className="rd-pdf-label">PDF</span>
                 </div>
                 {preview.description && <p className="rd-popup-desc">{preview.description}</p>}
-                <p className="rd-popup-hint">No preview link available</p>
+                <p className="rd-popup-hint">No preview link available for this resource</p>
               </div>
             )}
 
@@ -519,7 +557,8 @@ export default function NeetResourceDetails({ postId, onBack }) {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
