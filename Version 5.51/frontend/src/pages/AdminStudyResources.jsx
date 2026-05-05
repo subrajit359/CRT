@@ -5,7 +5,7 @@ import {
   Image as ImageIcon, BookOpen, Eye, CheckCircle2, Loader2, AlignLeft,
 } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
-import { api } from "../lib/api.js";
+import { api, apiUrl, getToken } from "../lib/api.js";
 import { useToast } from "../components/Toast.jsx";
 import { useAuth } from "../lib/auth.jsx";
 
@@ -13,9 +13,11 @@ import { useAuth } from "../lib/auth.jsx";
 async function uploadThumbnail(catId, file) {
   const fd = new FormData();
   fd.append("thumbnail", file);
-  const res = await fetch(`/api/study/categories/${catId}/thumbnail`, {
+  const token = getToken();
+  const res = await fetch(apiUrl(`/api/study/categories/${catId}/thumbnail`), {
     method: "POST",
     credentials: "include",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: fd,
   });
   if (!res.ok) {

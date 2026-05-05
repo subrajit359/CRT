@@ -7,10 +7,14 @@ import {
 } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
 import { useToast } from "../components/Toast.jsx";
+import { apiUrl, getToken } from "../lib/api.js";
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 async function apiFetch(path, opts = {}) {
-  const res = await fetch(path, { credentials: "include", ...opts });
+  const token = getToken();
+  const headers = { ...(opts.headers || {}) };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(apiUrl(path), { credentials: "include", ...opts, headers });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || "Request failed");
   return json;
@@ -19,9 +23,11 @@ async function apiFetch(path, opts = {}) {
 async function uploadThumbnail(postId, file) {
   const fd = new FormData();
   fd.append("thumbnail", file);
-  const res = await fetch(`/api/blog/posts/${postId}/thumbnail`, {
+  const token = getToken();
+  const res = await fetch(apiUrl(`/api/blog/posts/${postId}/thumbnail`), {
     method: "POST",
     credentials: "include",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: fd,
   });
   const j = await res.json().catch(() => ({}));
@@ -291,7 +297,7 @@ function PostEditor({ post, onSaved, onClose }) {
 
   useEffect(() => {
     if (post?.id) {
-      fetch(`/api/blog/posts/${post.id}`, { credentials: "include" })
+      fetch(apiUrl(`/api/blog/posts/${post.id}`), { credentials: "include" })
         .then((r) => r.json())
         .then((data) => { setSections(data.sections || []); setThumbnailUrl(data.thumbnail_url || null); })
         .catch(() => {});

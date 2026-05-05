@@ -960,7 +960,7 @@ export default function AdminMockQuestions() {
         const fd = new FormData();
         fd.append("file", form.attachmentFile);
         const token = localStorage.getItem("rsn_token");
-        const res = await fetch(`/api/mock/questions/${savedId}/attachment`, {
+        const res = await fetch(apiUrl(`/api/mock/questions/${savedId}/attachment`), {
           method: "POST", credentials: "include",
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           body: fd,
@@ -986,7 +986,7 @@ export default function AdminMockQuestions() {
       const fd = new FormData();
       fd.append("file", file);
       const token = localStorage.getItem("rsn_token");
-      const r = await fetch(`/api/mock/questions/${qid}/attachment`, {
+      const r = await fetch(apiUrl(`/api/mock/questions/${qid}/attachment`), {
         method: "POST", credentials: "include",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: fd,

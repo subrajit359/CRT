@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Mail, Clock, CheckCircle } from "lucide-react";
 import AppShell from "../components/AppShell.jsx";
 import { Link } from "wouter";
+import { apiUrl } from "../lib/api.js";
 
 const styles = `
 .contact-wrap {
@@ -77,7 +78,7 @@ export default function Contact() {
     setSending(true);
     setError("");
     try {
-      const res = await fetch("/api/contact", {
+      const res = await fetch(apiUrl("/api/contact"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
